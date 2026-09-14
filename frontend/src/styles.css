@@ -1,0 +1,14 @@
+:root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #142d2a; background: #f7f6f1; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 1080px; margin: auto; padding: 80px 32px; }
+header { max-width: 760px; }
+.eyebrow { color: #b85c38; font-size: .73rem; font-weight: 800; letter-spacing: .13em; }
+h1 { font-family: Georgia, serif; font-size: clamp(2.6rem, 6vw, 4.9rem); line-height: 1.02; letter-spacing: -.05em; margin: 18px 0; }
+h2 { font-family: Georgia, serif; font-size: 1.55rem; margin: 12px 0; }
+.intro { color: #536561; font-size: 1.15rem; line-height: 1.65; }
+.status-card { display: flex; justify-content: space-between; gap: 16px; padding: 18px 22px; margin: 54px 0 25px; background: #e4eee9; border-radius: 12px; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #ad624c; margin-right: 7px; }.dot.online { background: #23855e; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }.grid article, .coming-soon { background: white; padding: 26px; border-radius: 14px; box-shadow: 0 4px 18px #142d2a0a; }.grid span { color: #b85c38; font-weight: 800; }.grid p, .coming-soon p { color: #536561; line-height: 1.55; }.coming-soon { margin-top: 18px; }
+@media (max-width: 720px) { main { padding: 46px 20px; }.grid { grid-template-columns: 1fr; }.status-card { flex-direction: column; } }
+

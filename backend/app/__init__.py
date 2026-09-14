@@ -1,0 +1,1 @@
+"""Lead Opportunity Finder backend."""
