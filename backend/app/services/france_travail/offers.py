@@ -152,6 +152,21 @@ class FranceTravailOffersClient:
                 timeout=self._settings.france_travail_timeout_seconds,
             )
             response.raise_for_status()
+            if response.status_code == 204:
+                content_range_header = response.headers.get("Content-Range")
+                if content_range_header not in (None, "*/0"):
+                    raise FranceTravailOffersError(
+                        "France Travail returned inconsistent empty-page metadata."
+                    )
+                return OfferSearchPage(
+                    offers=(),
+                    http_status=response.status_code,
+                    offset=offset,
+                    limit=limit,
+                    total_count=0,
+                    next_offset=None,
+                    skipped_offers=0,
+                )
             payload = response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise FranceTravailOffersError("France Travail offers request failed.") from exc

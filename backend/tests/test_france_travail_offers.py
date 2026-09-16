@@ -25,6 +25,14 @@ class FakeResponse:
         return self._payload
 
 
+class EmptyResponse(FakeResponse):
+    def __init__(self):
+        super().__init__({}, {"Content-Range": "*/0"}, status_code=204)
+
+    def json(self) -> dict:
+        raise AssertionError("a 204 response must not be decoded as JSON")
+
+
 class FakeAuthClient:
     def get_access_token(self) -> str:
         return "test-access-token"
@@ -197,6 +205,18 @@ def test_invalid_payload_is_rejected_without_using_local_environment(monkeypatch
 
     with pytest.raises(FranceTravailOffersError):
         client().search_department_page(limit=1)
+
+
+def test_http_204_with_empty_content_range_is_a_valid_empty_window(monkeypatch):
+    monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: EmptyResponse())
+
+    page = client().search_department_page(limit=150)
+
+    assert page.http_status == 204
+    assert page.total_count == 0
+    assert page.offers == ()
+    assert page.next_offset is None
+    assert page.skipped_offers == 0
 
 
 def test_real_observed_header_pagination_is_rejected_when_second_page_overlaps(monkeypatch):

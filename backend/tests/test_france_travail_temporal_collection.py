@@ -98,6 +98,23 @@ def test_oversized_subwindow_is_split_recursively(session):
     assert result.offers_new == 3
 
 
+def test_empty_subwindow_is_valid_and_does_not_block_complete_scope(session):
+    initial, left, right = _split_windows()
+    totals = {
+        _key(initial): MAX_RESULTS_PER_QUERY + 1,
+        _key(left): 0,
+        _key(right): 1,
+    }
+    client = FakeTemporalClient(totals, {_key(right): (_offer("recent"),)})
+
+    result = _collector(client).collect(session)
+
+    assert result.status == "completed"
+    assert result.temporal_windows == 2
+    assert result.offers_received == 1
+    assert result.offers_new == 1
+
+
 def test_error_in_one_subwindow_fails_run_without_deactivation(session):
     _persist_existing(session, "protected", source="france_travail", department="94")
     initial, left, right = _split_windows()
