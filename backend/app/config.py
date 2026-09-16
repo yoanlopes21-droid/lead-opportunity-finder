@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     france_travail_client_id: Optional[str] = None
     france_travail_client_secret: Optional[str] = None
+    france_travail_token_url: str = (
+        "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=/partenaire"
+    )
+    france_travail_scope: str = "api_offresdemploiv2 o2dsoffre"
+    france_travail_offers_url: str = (
+        "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
+    )
+    france_travail_timeout_seconds: float = 10.0
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

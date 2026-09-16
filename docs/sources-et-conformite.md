@@ -4,3 +4,6 @@ Les premiers connecteurs étudiés seront France Travail, SIRENE/INSEE et les pa
 
 Chaque fait collecté devra conserver, lorsque disponible, sa source, son URL et sa date de collecte. Aucune clé API ne sera enregistrée dans le dépôt. Aucun contournement de protection, scraping agressif ou contact sortant automatisé n'est prévu.
 
+## France Travail
+
+Le connecteur officiel utilise OAuth2 `client_credentials` côté backend uniquement. Les identifiants locaux sont lus depuis `.env` et le contrôle d'authentification ne renvoie jamais de jeton. Il ne lance aucune recherche d'offres.

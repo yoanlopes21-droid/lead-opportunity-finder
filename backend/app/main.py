@@ -9,7 +9,8 @@ from sqlalchemy import text
 from app.config import get_settings
 from app.database import Base, engine
 from app import models  # noqa: F401 - registers metadata
-from app.schemas import AppSummary, HealthResponse
+from app.schemas import AppSummary, FranceTravailAuthCheckResponse, HealthResponse
+from app.services.france_travail.auth import FranceTravailAuthError, FranceTravailOAuthClient
 
 settings = get_settings()
 
@@ -26,7 +27,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -46,4 +47,31 @@ def summary() -> AppSummary:
         external_connectors_enabled=0,
         contact_automation_enabled=False,
         generated_at=datetime.now(timezone.utc),
+    )
+
+
+@app.post(
+    "/api/v1/sources/france-travail/auth-check",
+    response_model=FranceTravailAuthCheckResponse,
+    tags=["sources"],
+)
+def check_france_travail_authentication() -> FranceTravailAuthCheckResponse:
+    """Verify OAuth2 credentials without returning a token or querying job offers."""
+    client = FranceTravailOAuthClient(settings)
+    if not client.is_configured:
+        return FranceTravailAuthCheckResponse(
+            status="not_configured",
+            message="France Travail credentials are not configured locally.",
+        )
+
+    try:
+        client.get_access_token()
+    except FranceTravailAuthError:
+        return FranceTravailAuthCheckResponse(
+            status="authentication_failed",
+            message="France Travail authentication failed. Check local configuration and API access.",
+        )
+    return FranceTravailAuthCheckResponse(
+        status="authenticated",
+        message="France Travail authentication succeeded. No job search was performed.",
     )

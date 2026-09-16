@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -52,6 +52,56 @@ class JobOffer(TimestampedModel, Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(String(30), default="observed")
     __table_args__ = (UniqueConstraint("source_name", "source_offer_id", name="uq_job_offer_source_id"),)
+
+
+class CollectionRun(Base):
+    """A bounded source collection, used to distinguish complete runs from failures."""
+
+    __tablename__ = "collection_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(120), index=True)
+    scope_type: Mapped[str] = mapped_column(String(50))
+    scope_value: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(20), default="running", index=True)
+    is_full_scope: Mapped[bool] = mapped_column(Boolean, default=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    offers_received: Mapped[int] = mapped_column(Integer, default=0)
+    offers_new: Mapped[int] = mapped_column(Integer, default=0)
+    offers_updated: Mapped[int] = mapped_column(Integer, default=0)
+    offers_unchanged: Mapped[int] = mapped_column(Integer, default=0)
+    offers_skipped: Mapped[int] = mapped_column(Integer, default=0)
+    offers_deactivated: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ObservedJobOffer(Base):
+    """A source-independent offer snapshot with local observation metadata."""
+
+    __tablename__ = "observed_job_offers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(120), index=True)
+    source_offer_id: Mapped[str] = mapped_column(String(255), index=True)
+    title: Mapped[str] = mapped_column(String(500))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    company_name: Mapped[Optional[str]] = mapped_column(String(500), index=True)
+    location_label: Mapped[Optional[str]] = mapped_column(String(500))
+    commune: Mapped[Optional[str]] = mapped_column(String(255), index=True)
+    department_code: Mapped[Optional[str]] = mapped_column(String(10), index=True)
+    created_at: Mapped[Optional[str]] = mapped_column(String(64))
+    updated_at: Mapped[Optional[str]] = mapped_column(String(64))
+    contract_type: Mapped[Optional[str]] = mapped_column(String(100))
+    salary: Mapped[Optional[str]] = mapped_column(String(500))
+    source_url: Mapped[Optional[str]] = mapped_column(String(2048))
+    origin: Mapped[Optional[str]] = mapped_column(String(255))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    observation_count: Mapped[int] = mapped_column(Integer, default=1)
+    last_seen_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("collection_runs.id"), index=True)
+    __table_args__ = (
+        UniqueConstraint("source", "source_offer_id", name="uq_observed_job_offer_source_id"),
+    )
 
 
 class Contact(TimestampedModel, Base):

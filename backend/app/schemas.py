@@ -15,3 +15,7 @@ class AppSummary(BaseModel):
     contact_automation_enabled: bool
     generated_at: datetime
 
+
+class FranceTravailAuthCheckResponse(BaseModel):
+    status: str
+    message: str

@@ -1,0 +1,1 @@
+"""Official France Travail integrations."""
