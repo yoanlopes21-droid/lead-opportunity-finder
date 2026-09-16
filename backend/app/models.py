@@ -104,6 +104,68 @@ class ObservedJobOffer(Base):
     )
 
 
+class EnrichmentRun(Base):
+    """One auditable batch of source-independent company enrichments."""
+
+    __tablename__ = "enrichment_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(120), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(40), default="running", index=True)
+    selected_count: Mapped[int] = mapped_column(Integer, default=0)
+    processed_count: Mapped[int] = mapped_column(Integer, default=0)
+    high_confidence_count: Mapped[int] = mapped_column(Integer, default=0)
+    review_needed_count: Mapped[int] = mapped_column(Integer, default=0)
+    ambiguous_count: Mapped[int] = mapped_column(Integer, default=0)
+    generic_count: Mapped[int] = mapped_column(Integer, default=0)
+    not_found_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class CompanyEnrichment(Base):
+    """Latest enrichment state for one internal company key and provider."""
+
+    __tablename__ = "company_enrichments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    source_company_name: Mapped[str] = mapped_column(String(500))
+    provider: Mapped[str] = mapped_column(String(120), index=True)
+    match_status: Mapped[str] = mapped_column(String(40), index=True)
+    confidence_score: Mapped[Optional[float]] = mapped_column(Float)
+    entity_sector_type: Mapped[str] = mapped_column(String(20), default="unknown", index=True)
+
+    # Confirmed legal identity: populated only for matched_high_confidence.
+    siren: Mapped[Optional[str]] = mapped_column(String(9), index=True)
+    siret: Mapped[Optional[str]] = mapped_column(String(14))
+    official_name: Mapped[Optional[str]] = mapped_column(String(500))
+    address: Mapped[Optional[str]] = mapped_column(Text)
+    postal_code: Mapped[Optional[str]] = mapped_column(String(10))
+    commune: Mapped[Optional[str]] = mapped_column(String(255))
+    naf_code: Mapped[Optional[str]] = mapped_column(String(20))
+    activity_label: Mapped[Optional[str]] = mapped_column(String(500))
+    legal_nature: Mapped[Optional[str]] = mapped_column(String(50))
+    employee_range: Mapped[Optional[str]] = mapped_column(String(50))
+    administrative_status: Mapped[Optional[str]] = mapped_column(String(20))
+
+    # A proposal requiring review is never exposed as confirmed identity.
+    suggested_siren: Mapped[Optional[str]] = mapped_column(String(9))
+    suggested_name: Mapped[Optional[str]] = mapped_column(String(500))
+    suggested_score: Mapped[Optional[float]] = mapped_column(Float)
+
+    enriched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    last_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    provider_source: Mapped[Optional[str]] = mapped_column(String(2048))
+    input_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    last_error_type: Mapped[Optional[str]] = mapped_column(String(100))
+    last_error_message: Mapped[Optional[str]] = mapped_column(String(500))
+    last_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("enrichment_runs.id"), index=True)
+    __table_args__ = (
+        UniqueConstraint("company_key", "provider", name="uq_company_enrichment_key_provider"),
+    )
+
+
 class Contact(TimestampedModel, Base):
     __tablename__ = "contacts"
     id: Mapped[int] = mapped_column(primary_key=True)

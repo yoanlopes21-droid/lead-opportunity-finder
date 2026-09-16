@@ -6,10 +6,12 @@ from app.services.company_enrichment.dinum import (
     DinumSearchError,
     enrich_company_opportunity,
 )
+from app.services.company_enrichment.dinum_adapter import DinumCompanyEnrichmentProvider
 
 __all__ = [
     "CompanyEnrichmentResult",
     "DinumCompanySearchClient",
     "DinumSearchError",
+    "DinumCompanyEnrichmentProvider",
     "enrich_company_opportunity",
 ]
