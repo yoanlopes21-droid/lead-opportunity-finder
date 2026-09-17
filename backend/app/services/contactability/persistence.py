@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import Engine, select
@@ -141,7 +141,7 @@ def add_contact_evidence(
             excerpt=_optional_text(item.excerpt), fingerprint=fingerprint,
         )
         session.add(row)
-    elif item.observed_at > row.observed_at:
+    elif _as_utc(item.observed_at) > _as_utc(row.observed_at):
         row.observed_at = item.observed_at
     session.flush()
     return row
@@ -234,7 +234,7 @@ def _refresh_person(row: PersonContact, item: PersonContactInput, normalized_nam
     row.confidence_level = item.confidence_level
     row.verification_status = item.verification_status
     row.attribution_reason = _optional_text(item.attribution_reason)
-    row.last_observed_at = max(row.last_observed_at, item.observed_at)
+    row.last_observed_at = _latest_datetime(row.last_observed_at, item.observed_at)
     row.is_active = True
 
 
@@ -248,7 +248,7 @@ def _refresh_point(row: ContactPoint, item: ContactPointInput, normalized_value:
     row.confidence_level = item.confidence_level
     row.verification_status = item.verification_status
     row.attribution_reason = _optional_text(item.attribution_reason)
-    row.last_observed_at = max(row.last_observed_at, item.observed_at)
+    row.last_observed_at = _latest_datetime(row.last_observed_at, item.observed_at)
     row.is_active = True
 
 
@@ -274,3 +274,13 @@ def _required_text(value: Optional[str], label: str) -> str:
 
 def _optional_text(value: Optional[str]) -> Optional[str]:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _latest_datetime(current: datetime, candidate: datetime) -> datetime:
+    return candidate if _as_utc(candidate) > _as_utc(current) else current
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

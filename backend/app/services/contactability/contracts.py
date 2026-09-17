@@ -154,12 +154,16 @@ class ContactEvidenceInput:
 class ContactProviderStatus:
     COMPLETED = "completed"
     NOT_FOUND = "not_found"
+    NOT_APPLICABLE = "not_applicable"
+    NOT_CONFIGURED = "not_configured"
     ERROR = "error"
 
 
 VALID_CONTACT_PROVIDER_STATUSES = {
     ContactProviderStatus.COMPLETED,
     ContactProviderStatus.NOT_FOUND,
+    ContactProviderStatus.NOT_APPLICABLE,
+    ContactProviderStatus.NOT_CONFIGURED,
     ContactProviderStatus.ERROR,
 }
 
@@ -194,11 +198,40 @@ class ContactPointCandidate:
 
 
 @dataclass(frozen=True)
+class PersonContactCandidate:
+    company_key: str
+    organization_name_snapshot: str
+    scope: str
+    full_name: str
+    normalized_name: str
+    relevance_role: str
+    confidence_level: str
+    verification_status: str
+    attribution_reason: Optional[str]
+    job_title: Optional[str] = None
+    local_key: Optional[str] = None
+    siren: Optional[str] = None
+    local_commune_snapshot: Optional[str] = None
+    local_location_label_snapshot: Optional[str] = None
+    evidence: tuple[ContactEvidenceCandidate, ...] = ()
+
+
+@dataclass(frozen=True)
+class ContactProviderAttemptMetadata:
+    target_fingerprint: str
+    attempted_at: Optional[datetime]
+    request_count: int = 0
+    error_type: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class ContactProviderResult:
     provider: str
     status: str
     candidates: tuple[ContactPointCandidate, ...] = ()
+    person_candidates: tuple[PersonContactCandidate, ...] = ()
     warnings: tuple[str, ...] = ()
+    metadata: Optional[ContactProviderAttemptMetadata] = None
 
 
 class ContactProvider(Protocol):

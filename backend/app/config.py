@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +26,12 @@ class Settings(BaseSettings):
         "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
     )
     france_travail_timeout_seconds: float = 10.0
+    societe_com_api_token: Optional[SecretStr] = None
+    societe_com_api_url: str = "https://api.societe.com/api/v1"
+    societe_com_timeout_seconds: float = 10.0
+    societe_com_requests_per_second: float = 1.0
+    societe_com_contact_ttl_days: int = 30
+    societe_com_directors_ttl_days: int = 90
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
