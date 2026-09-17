@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -290,3 +290,89 @@ class CommercialExclusion(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersonContact(Base):
+    """A sourced professional person candidate; contact methods live in ContactPoint."""
+
+    __tablename__ = "person_contacts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    scope: Mapped[str] = mapped_column(String(30), index=True)
+    local_key: Mapped[Optional[str]] = mapped_column(String(500), index=True)
+    siren: Mapped[Optional[str]] = mapped_column(String(9), index=True)
+    organization_name_snapshot: Mapped[str] = mapped_column(String(500))
+    local_commune_snapshot: Mapped[Optional[str]] = mapped_column(String(255))
+    local_location_label_snapshot: Mapped[Optional[str]] = mapped_column(String(500))
+    full_name: Mapped[str] = mapped_column(String(255))
+    normalized_name: Mapped[str] = mapped_column(String(255), index=True)
+    job_title: Mapped[Optional[str]] = mapped_column(String(255))
+    relevance_role: Mapped[str] = mapped_column(String(30), index=True)
+    confidence_level: Mapped[str] = mapped_column(String(30), index=True)
+    verification_status: Mapped[str] = mapped_column(String(30), index=True)
+    attribution_reason: Mapped[Optional[str]] = mapped_column(Text)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    first_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    __table_args__ = (
+        CheckConstraint("scope != 'local' OR local_key IS NOT NULL", name="ck_person_contact_local_scope_key"),
+    )
+
+
+class ContactPoint(Base):
+    """A non-secret public contact method, independently sourced and scoped."""
+
+    __tablename__ = "contact_points"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    scope: Mapped[str] = mapped_column(String(30), index=True)
+    local_key: Mapped[Optional[str]] = mapped_column(String(500), index=True)
+    siren: Mapped[Optional[str]] = mapped_column(String(9), index=True)
+    organization_name_snapshot: Mapped[str] = mapped_column(String(500))
+    local_commune_snapshot: Mapped[Optional[str]] = mapped_column(String(255))
+    local_location_label_snapshot: Mapped[Optional[str]] = mapped_column(String(500))
+    contact_type: Mapped[str] = mapped_column(String(30), index=True)
+    value: Mapped[str] = mapped_column(String(2048))
+    normalized_value: Mapped[str] = mapped_column(String(2048), index=True)
+    confidence_level: Mapped[str] = mapped_column(String(30), index=True)
+    verification_status: Mapped[str] = mapped_column(String(30), index=True)
+    attribution_reason: Mapped[Optional[str]] = mapped_column(Text)
+    person_contact_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("person_contacts.id"), index=True
+    )
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    first_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    __table_args__ = (
+        CheckConstraint("scope != 'local' OR local_key IS NOT NULL", name="ck_contact_point_local_scope_key"),
+    )
+
+
+class ContactEvidence(Base):
+    """Minimal provenance for exactly one contact point or person candidate."""
+
+    __tablename__ = "contact_evidence"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    contact_point_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("contact_points.id"), index=True
+    )
+    person_contact_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("person_contacts.id"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(120), index=True)
+    source_name: Mapped[str] = mapped_column(String(255))
+    source_url: Mapped[Optional[str]] = mapped_column(String(2048))
+    source_identifier: Mapped[Optional[str]] = mapped_column(String(500))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    evidence_reason: Mapped[Optional[str]] = mapped_column(Text)
+    excerpt: Mapped[Optional[str]] = mapped_column(String(1000))
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    __table_args__ = (
+        CheckConstraint(
+            "(contact_point_id IS NOT NULL AND person_contact_id IS NULL) "
+            "OR (contact_point_id IS NULL AND person_contact_id IS NOT NULL)",
+            name="ck_contact_evidence_exactly_one_target",
+        ),
+    )
