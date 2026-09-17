@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Protocol, Sequence
 
 
 class ContactScope:
@@ -149,3 +149,73 @@ class ContactEvidenceInput:
     source_identifier: Optional[str] = None
     evidence_reason: Optional[str] = None
     excerpt: Optional[str] = None
+
+
+class ContactProviderStatus:
+    COMPLETED = "completed"
+    NOT_FOUND = "not_found"
+    ERROR = "error"
+
+
+VALID_CONTACT_PROVIDER_STATUSES = {
+    ContactProviderStatus.COMPLETED,
+    ContactProviderStatus.NOT_FOUND,
+    ContactProviderStatus.ERROR,
+}
+
+
+@dataclass(frozen=True)
+class ContactEvidenceCandidate:
+    provider: str
+    source_name: str
+    observed_at: datetime
+    source_url: Optional[str] = None
+    source_identifier: Optional[str] = None
+    evidence_reason: Optional[str] = None
+    excerpt: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ContactPointCandidate:
+    company_key: str
+    organization_name_snapshot: str
+    scope: str
+    contact_type: str
+    value: str
+    normalized_value: str
+    confidence_level: str
+    verification_status: str
+    attribution_reason: Optional[str]
+    local_key: Optional[str] = None
+    siren: Optional[str] = None
+    local_commune_snapshot: Optional[str] = None
+    local_location_label_snapshot: Optional[str] = None
+    evidence: tuple[ContactEvidenceCandidate, ...] = ()
+
+
+@dataclass(frozen=True)
+class ContactProviderResult:
+    provider: str
+    status: str
+    candidates: tuple[ContactPointCandidate, ...] = ()
+    warnings: tuple[str, ...] = ()
+
+
+class ContactProvider(Protocol):
+    name: str
+
+    def discover(
+        self, target: ContactTarget, offers: Sequence["OfferContactSource"]
+    ) -> ContactProviderResult:
+        ...
+
+
+class OfferContactSource(Protocol):
+    source: str
+    source_offer_id: str
+    description: Optional[str]
+    source_url: Optional[str]
+    company_name: Optional[str]
+    commune: Optional[str]
+    location_label: Optional[str]
+    last_seen_at: datetime
