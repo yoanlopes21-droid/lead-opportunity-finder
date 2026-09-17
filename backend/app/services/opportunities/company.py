@@ -29,6 +29,24 @@ class OpportunitySignal:
 
 
 @dataclass(frozen=True)
+class LocalOpportunity:
+    """A descriptive, non-juridical grouping of one company's active offers."""
+
+    local_key: str
+    commune: Optional[str]
+    location_label: Optional[str]
+    department_code: str
+    active_offer_count: int
+    distinct_job_title_count: int
+    representative_job_titles: tuple[str, ...]
+    oldest_offer_created_at: Optional[str]
+    newest_offer_created_at: Optional[str]
+    source_offer_ids: tuple[str, ...]
+    source_urls: tuple[str, ...]
+    signals: tuple[OpportunitySignal, ...]
+
+
+@dataclass(frozen=True)
 class CompanyOpportunity:
     company_key: str
     company_name: str
@@ -58,6 +76,7 @@ class CompanyOpportunity:
     intermediary_description_evidence: IntermediaryDescriptionEvidence = field(
         default_factory=IntermediaryDescriptionEvidence
     )
+    local_opportunities: tuple[LocalOpportunity, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -153,6 +172,7 @@ def _build_opportunity(
         OpportunitySignal("recurrent_observation_signal", any(offer.observation_count >= 2 for offer in offers), f"{sum(offer.observation_count >= 2 for offer in offers)} offre(s) observée(s) dans plusieurs runs."),
     )
     intermediary_description_evidence = analyze_intermediary_descriptions(offers)
+    local_opportunities = _build_local_opportunities(offers, department_code)
     return CompanyOpportunity(
         company_key=company_key,
         company_name=original_name,
@@ -180,6 +200,104 @@ def _build_opportunity(
         median_offer_age_days=round(float(median(ages)), 1) if ages else None,
         signals=signals,
         intermediary_description_evidence=intermediary_description_evidence,
+        local_opportunities=local_opportunities,
+    )
+
+
+def _build_local_opportunities(
+    offers: Sequence[ObservedJobOffer], department_code: str
+) -> tuple[LocalOpportunity, ...]:
+    grouped: dict[str, list[ObservedJobOffer]] = {}
+    locations: dict[str, tuple[Optional[str], Optional[str]]] = {}
+    for offer in offers:
+        local_key, commune, location_label = _local_bucket(offer, department_code)
+        grouped.setdefault(local_key, []).append(offer)
+        locations.setdefault(local_key, (commune, location_label))
+
+    opportunities: list[LocalOpportunity] = []
+    for local_key, local_offers in grouped.items():
+        commune, fallback_label = locations[local_key]
+        location_label = next(
+            (_clean_location_value(offer.location_label) for offer in local_offers if _clean_location_value(offer.location_label)),
+            fallback_label,
+        )
+        titles = _representative_distinct(
+            (offer.title, _normalize_text_key(offer.title)) for offer in local_offers
+        )
+        dates = [
+            created_at
+            for offer in local_offers
+            if (created_at := _parse_datetime(offer.created_at)) is not None
+        ]
+        source_offer_ids = tuple(sorted(_qualified_offer_id(offer) for offer in local_offers))
+        source_urls = _sorted_distinct(offer.source_url for offer in local_offers)
+        opportunities.append(
+            LocalOpportunity(
+                local_key=local_key,
+                commune=commune,
+                location_label=location_label,
+                department_code=department_code,
+                active_offer_count=len(local_offers),
+                distinct_job_title_count=len(titles),
+                representative_job_titles=titles,
+                oldest_offer_created_at=_format_datetime(min(dates)) if dates else None,
+                newest_offer_created_at=_format_datetime(max(dates)) if dates else None,
+                source_offer_ids=source_offer_ids,
+                source_urls=source_urls,
+                signals=_local_signals(local_offers, titles),
+            )
+        )
+    return tuple(
+        sorted(
+            opportunities,
+            key=lambda item: (
+                -item.active_offer_count,
+                (item.commune or item.location_label or "").casefold(),
+                item.local_key,
+            ),
+        )
+    )
+
+
+def _local_bucket(
+    offer: ObservedJobOffer, department_code: str
+) -> tuple[str, Optional[str], Optional[str]]:
+    commune = _clean_location_value(offer.commune)
+    if commune:
+        return (
+            f"commune:{department_code}:{_normalize_location_key(commune)}",
+            commune,
+            None,
+        )
+    location_label = _clean_location_value(offer.location_label)
+    if location_label:
+        return (
+            f"location:{department_code}:{_normalize_location_key(location_label)}",
+            None,
+            location_label,
+        )
+    return (f"unknown_location:{department_code}", None, None)
+
+
+def _local_signals(
+    offers: Sequence[ObservedJobOffer], titles: tuple[str, ...]
+) -> tuple[OpportunitySignal, ...]:
+    return (
+        OpportunitySignal(
+            "local_hiring_volume_signal",
+            len(offers) >= 2,
+            f"{len(offers)} offre(s) active(s) dans cette localisation.",
+        ),
+        OpportunitySignal(
+            "local_role_diversity_signal",
+            len(titles) >= 2,
+            f"{len(titles)} intitulé(s) distinct(s) dans cette localisation.",
+        ),
+        OpportunitySignal(
+            "local_recurrent_observation_signal",
+            any(offer.observation_count >= 2 for offer in offers),
+            f"{sum(offer.observation_count >= 2 for offer in offers)} offre(s) observée(s) dans plusieurs runs dans cette localisation.",
+        ),
     )
 
 
@@ -199,6 +317,20 @@ def _format_datetime(value: Optional[datetime]) -> Optional[str]:
 
 def _normalize_text_key(value: Optional[str]) -> Optional[str]:
     return " ".join(value.casefold().split()) if isinstance(value, str) and value.strip() else None
+
+
+def _clean_location_value(value: Optional[str]) -> Optional[str]:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _normalize_location_key(value: str) -> str:
+    normalized = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", value).casefold()
+        if not unicodedata.combining(character)
+    ).strip()
+    normalized = re.sub(r"[^\w\s]", " ", normalized, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _sorted_distinct(values) -> tuple[str, ...]:

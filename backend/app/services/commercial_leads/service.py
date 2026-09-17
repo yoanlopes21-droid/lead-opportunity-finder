@@ -19,6 +19,7 @@ from app.services.commercial_leads.exclusions import (
 from app.services.company_enrichment.contracts import MatchStatus
 from app.services.opportunities.company import (
     CompanyOpportunity,
+    LocalOpportunity,
     OpportunitySignal,
     aggregate_active_company_opportunities,
     normalize_company_key,
@@ -52,6 +53,7 @@ class CommercialLead:
     representative_job_titles: tuple[str, ...]
     newest_offer_created_at: Optional[str]
     oldest_offer_created_at: Optional[str]
+    local_opportunities: tuple[LocalOpportunity, ...]
     latent_signals: tuple[OpportunitySignal, ...]
     scoring: CompanyScoringResult
     evidence: tuple[LeadEvidence, ...]
@@ -153,6 +155,7 @@ def _build_lead(
         representative_job_titles=opportunity.job_titles,
         newest_offer_created_at=opportunity.newest_offer_created_at,
         oldest_offer_created_at=opportunity.oldest_offer_created_at,
+        local_opportunities=opportunity.local_opportunities,
         latent_signals=tuple(signal for signal in opportunity.signals if signal.active),
         scoring=scoring,
         evidence=evidence,

@@ -48,6 +48,23 @@ class LeadEvidenceResponse(BaseModel):
     observed_at: datetime
 
 
+class LocalOpportunityResponse(BaseModel):
+    """Descriptive local offer bucket; it is not a legal establishment identity."""
+
+    local_key: str
+    commune: Optional[str]
+    location_label: Optional[str]
+    department: str
+    active_offer_count: int
+    role_diversity: int
+    representative_roles: list[str]
+    newest_offer_date: Optional[str]
+    oldest_offer_date: Optional[str]
+    source_offer_ids: list[str]
+    source_urls: list[str]
+    signals: list[OpportunitySignalResponse]
+
+
 class IntermediaryDescriptionExampleResponse(BaseModel):
     offer_id: str
     title: str
@@ -90,6 +107,7 @@ class CommercialLeadResponse(BaseModel):
     representative_roles: list[str]
     newest_offer_date: Optional[str]
     oldest_relevant_offer_date: Optional[str]
+    local_opportunities: list[LocalOpportunityResponse]
     latent_signals: list[OpportunitySignalResponse]
     total_score: int
     category: str
@@ -123,6 +141,20 @@ class CommercialLeadResponse(BaseModel):
             representative_roles=list(lead.representative_job_titles),
             newest_offer_date=lead.newest_offer_created_at,
             oldest_relevant_offer_date=lead.oldest_offer_created_at,
+            local_opportunities=[LocalOpportunityResponse(
+                local_key=item.local_key,
+                commune=item.commune,
+                location_label=item.location_label,
+                department=item.department_code,
+                active_offer_count=item.active_offer_count,
+                role_diversity=item.distinct_job_title_count,
+                representative_roles=list(item.representative_job_titles),
+                newest_offer_date=item.newest_offer_created_at,
+                oldest_offer_date=item.oldest_offer_created_at,
+                source_offer_ids=list(item.source_offer_ids),
+                source_urls=list(item.source_urls),
+                signals=[OpportunitySignalResponse(**signal.__dict__) for signal in item.signals],
+            ) for item in lead.local_opportunities],
             latent_signals=[OpportunitySignalResponse(**item.__dict__) for item in lead.latent_signals],
             total_score=lead.scoring.total_score,
             category=lead.scoring.category,

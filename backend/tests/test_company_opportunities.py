@@ -10,6 +10,7 @@ from app.services.opportunities.company import (
     aggregate_active_company_opportunities,
     normalize_company_key,
 )
+from app.services.scoring.company import EnrichmentSnapshot, score_company_opportunity
 
 
 NOW = datetime(2026, 9, 16, tzinfo=timezone.utc)
@@ -98,6 +99,76 @@ def test_company_key_only_normalizes_trivial_spacing_case_and_punctuation():
     assert normalize_company_key(None) is None
 
 
+def test_local_opportunity_aggregates_offers_by_structured_commune_and_preserves_evidence(session):
+    _add(session, "1", company="ACME", commune="94028", location_label="Créteil Centre", title="Technicien", source_url="https://example.test/1")
+    _add(session, "2", company="ACME", commune="94028", location_label="Créteil Sud", title="Commercial", source_url="https://example.test/2")
+    session.commit()
+
+    local = aggregate_active_company_opportunities(session, now=NOW).opportunities[0].local_opportunities[0]
+
+    assert local.local_key == "commune:94:94028"
+    assert local.commune == "94028" and local.location_label == "Créteil Centre"
+    assert local.active_offer_count == 2 and local.distinct_job_title_count == 2
+    assert local.representative_job_titles == ("Commercial", "Technicien")
+    assert local.source_offer_ids == ("source_a:1", "source_a:2")
+    assert local.source_urls == ("https://example.test/1", "https://example.test/2")
+
+
+def test_local_opportunities_split_communes_without_duplicate_offers_and_keep_global_score(session):
+    _add(session, "1", company="ACME", commune="94028", title="Technicien")
+    _add(session, "2", company="ACME", commune="94029", title="Commercial")
+    session.commit()
+
+    opportunity = aggregate_active_company_opportunities(session, now=NOW).opportunities[0]
+    locals_ = opportunity.local_opportunities
+
+    assert [item.commune for item in locals_] == ["94028", "94029"]
+    assert sum(item.active_offer_count for item in locals_) == opportunity.active_offer_count
+    assert {offer_id for item in locals_ for offer_id in item.source_offer_ids} == set(opportunity.offer_ids)
+    baseline = score_company_opportunity(
+        opportunity.__class__(**{**opportunity.__dict__, "local_opportunities": ()}),
+        EnrichmentSnapshot(),
+    )
+    assert score_company_opportunity(opportunity, EnrichmentSnapshot()).total_score == baseline.total_score
+
+
+def test_local_opportunity_uses_normalized_location_label_when_commune_is_missing(session):
+    _add(session, "1", company="ACME", commune=None, location_label="L'Haÿ-les-Roses")
+    _add(session, "2", company="ACME", commune=None, location_label="l hay les roses")
+    session.commit()
+
+    local = aggregate_active_company_opportunities(session, now=NOW).opportunities[0].local_opportunities[0]
+
+    assert local.local_key == "location:94:l hay les roses"
+    assert local.commune is None and local.location_label in {"L'Haÿ-les-Roses", "l hay les roses"}
+    assert local.active_offer_count == 2
+    assert aggregate_active_company_opportunities(session, now=NOW).opportunities[0].local_opportunities[0] == local
+
+
+def test_local_opportunity_uses_a_deterministic_unknown_location_bucket(session):
+    _add(session, "1", company="ACME", commune=None, location_label=None)
+    _add(session, "2", company="ACME", commune=None, location_label=None)
+    session.commit()
+
+    local = aggregate_active_company_opportunities(session, now=NOW).opportunities[0].local_opportunities[0]
+
+    assert local.local_key == "unknown_location:94"
+    assert local.commune is None and local.location_label is None
+    assert local.active_offer_count == 2
+
+
+def test_single_location_company_has_one_sorted_local_opportunity(session):
+    _add(session, "1", company="ACME", commune="94028", title="Technicien", age_days=4)
+    _add(session, "2", company="ACME", commune="94028", title="Technicien", age_days=1)
+    session.commit()
+
+    local_opportunities = aggregate_active_company_opportunities(session, now=NOW).opportunities[0].local_opportunities
+
+    assert len(local_opportunities) == 1
+    assert local_opportunities[0].newest_offer_created_at.endswith("Z")
+    assert local_opportunities[0].oldest_offer_created_at.endswith("Z")
+
+
 def _add(
     session,
     offer_id,
@@ -113,6 +184,7 @@ def _add(
     active=True,
     observations=1,
     description=None,
+    source_url=None,
 ):
     if created_at == "default":
         created_at = (NOW - timedelta(days=age_days)).isoformat().replace("+00:00", "Z")
@@ -127,6 +199,7 @@ def _add(
         commune=commune,
         department_code=department,
         created_at=created_at,
+        source_url=source_url,
         first_seen_at=NOW - timedelta(days=age_days),
         last_seen_at=NOW,
         last_changed_at=NOW,
