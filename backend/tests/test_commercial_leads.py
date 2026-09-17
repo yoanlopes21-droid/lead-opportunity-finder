@@ -29,9 +29,9 @@ def session(tmp_path):
     engine.dispose()
 
 
-def add_offer(session, identifier, company="ACME SAS", age_days=2, title="Technicien", source="source", url="https://source.test/offer"):
+def add_offer(session, identifier, company="ACME SAS", age_days=2, title="Technicien", source="source", url="https://source.test/offer", description=None):
     row = ObservedJobOffer(
-        source=source, source_offer_id=identifier, title=title, company_name=company,
+        source=source, source_offer_id=identifier, title=title, company_name=company, description=description,
         location_label="Créteil", commune="94028", department_code="94",
         created_at=(NOW - timedelta(days=age_days)).isoformat().replace("+00:00", "Z"),
         source_url=url, first_seen_at=NOW - timedelta(days=age_days), last_seen_at=NOW,
@@ -152,6 +152,14 @@ def test_not_found_enrichment_remains_a_supported_lead(session):
     add_enrichment(session, status=MatchStatus.NOT_FOUND)
     lead = list_commercial_leads(session, now=NOW).items[0]
     assert lead.entity_sector_type == "private" and lead.siren is None and lead.is_eligible
+
+
+def test_suspected_intermediary_remains_eligible_with_a_moderate_penalty(session):
+    add_offer(session, "1", description="Nous recrutons pour notre client.")
+    lead = list_commercial_leads(session, now=NOW).items[0]
+    assert lead.is_eligible
+    assert lead.scoring.employer_relationship_status == "intermediary_suspected"
+    assert any(item.code == "intermediary_suspected_penalty" for item in lead.scoring.penalties)
 
 
 def test_building_leads_does_not_mutate_source_rows(session):

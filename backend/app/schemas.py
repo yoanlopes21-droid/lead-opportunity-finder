@@ -48,6 +48,21 @@ class LeadEvidenceResponse(BaseModel):
     observed_at: datetime
 
 
+class IntermediaryDescriptionExampleResponse(BaseModel):
+    offer_id: str
+    title: str
+    location_label: Optional[str]
+    marker_types: list[str]
+
+
+class IntermediaryDescriptionEvidenceResponse(BaseModel):
+    total_offer_count: int
+    strong_signal_offer_count: int
+    strong_signal_proportion: float
+    marker_types: list[str]
+    examples: list[IntermediaryDescriptionExampleResponse]
+
+
 class CommercialExclusionResponse(BaseModel):
     id: int
     company_key: str
@@ -83,6 +98,9 @@ class CommercialLeadResponse(BaseModel):
     positive_reasons: list[ScoreReasonResponse]
     penalties: list[ScoreReasonResponse]
     signals_used: list[OpportunitySignalResponse]
+    employer_relationship_status: str
+    employer_relationship_reasons: list[ScoreReasonResponse]
+    intermediary_description_evidence: IntermediaryDescriptionEvidenceResponse
     evidence: list[LeadEvidenceResponse]
     is_eligible: bool
     exclusion: Optional[CommercialExclusionResponse]
@@ -113,6 +131,20 @@ class CommercialLeadResponse(BaseModel):
             positive_reasons=[ScoreReasonResponse(**item.__dict__) for item in lead.scoring.positive_reasons],
             penalties=[ScoreReasonResponse(**item.__dict__) for item in lead.scoring.penalties],
             signals_used=[OpportunitySignalResponse(**item.__dict__) for item in lead.scoring.signals_used],
+            employer_relationship_status=lead.scoring.employer_relationship_status,
+            employer_relationship_reasons=[ScoreReasonResponse(**item.__dict__) for item in lead.scoring.employer_relationship_reasons],
+            intermediary_description_evidence=IntermediaryDescriptionEvidenceResponse(
+                total_offer_count=lead.scoring.intermediary_description_evidence.total_offer_count,
+                strong_signal_offer_count=lead.scoring.intermediary_description_evidence.strong_signal_offer_count,
+                strong_signal_proportion=lead.scoring.intermediary_description_evidence.strong_signal_proportion,
+                marker_types=list(lead.scoring.intermediary_description_evidence.marker_types),
+                examples=[IntermediaryDescriptionExampleResponse(
+                    offer_id=item.offer_id,
+                    title=item.title,
+                    location_label=item.location_label,
+                    marker_types=list(item.marker_types),
+                ) for item in lead.scoring.intermediary_description_evidence.examples],
+            ),
             evidence=[LeadEvidenceResponse(**item.__dict__) for item in lead.evidence],
             is_eligible=lead.is_eligible,
             exclusion=(CommercialExclusionResponse(**lead.exclusion.__dict__) if lead.exclusion else None),

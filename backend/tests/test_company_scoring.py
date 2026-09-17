@@ -1,6 +1,11 @@
 from app.services.company_enrichment.contracts import MatchStatus
 from app.services.opportunities.company import CompanyOpportunity, OpportunitySignal
+from app.services.opportunities.intermediary import (
+    IntermediaryDescriptionEvidence,
+    analyze_intermediary_descriptions,
+)
 from app.services.scoring.company import (
+    EmployerRelationshipStatus,
     EnrichmentSnapshot,
     ScoreCategory,
     ScoringPolicy,
@@ -21,6 +26,7 @@ def opportunity(
     sources=("france_travail",),
     recurrent=False,
     multi_location=False,
+    description_evidence=None,
 ):
     signals = tuple(
         OpportunitySignal(name, active, name)
@@ -42,6 +48,7 @@ def opportunity(
         offers_over_21_days=over_21, offers_over_45_days=over_45,
         offers_over_90_days=over_90, average_offer_age_days=float(newest_age) if newest_age is not None else None,
         median_offer_age_days=float(newest_age) if newest_age is not None else None, signals=signals,
+        intermediary_description_evidence=description_evidence or IntermediaryDescriptionEvidence(),
     )
 
 
@@ -205,7 +212,113 @@ def test_explicit_intermediary_aliases_are_treated_as_intermediaries():
         assert any(item.code == f"intermediary_signal:{expected_code}" for item in result.commercial_adjustments)
 
 
+def test_distinctive_alias_matches_as_a_complete_phrase_in_a_longer_name():
+    result = score_company_opportunity(
+        opportunity(name="RANDSTAD PROFESSIONAL - APPEL MEDICAL - X", offers=30, roles=10),
+        enrichment(),
+    )
+    assert result.employer_relationship_status == EmployerRelationshipStatus.INTERMEDIARY
+    assert any(item.code == "intermediary_signal:alias_appel_medical" for item in result.commercial_adjustments)
+
+
+def test_distinctive_alias_phrase_normalizes_case_and_punctuation():
+    result = score_company_opportunity(opportunity(name="Randstad / Appel-Médical (IDF)"), enrichment())
+    assert any(item.code == "intermediary_signal:alias_appel_medical" for item in result.commercial_adjustments)
+
+
+def test_alias_phrase_does_not_match_a_partial_word():
+    result = score_company_opportunity(opportunity(name="Appel Medicalement Services"), enrichment())
+    assert result.employer_relationship_status == EmployerRelationshipStatus.DIRECT_EMPLOYER
+
+
 def test_rh_alone_is_not_an_intermediary_signal():
     result = score_company_opportunity(opportunity(name="Cabinet RH", offers=30, roles=10), enrichment())
     assert result.subscores.direct_need == 35
     assert not any(item.code.startswith("intermediary_signal:") for item in result.commercial_adjustments)
+
+
+def text_evidence(*descriptions):
+    return analyze_intermediary_descriptions(tuple(
+        type("Offer", (), {
+            "source": "source", "source_offer_id": str(index), "title": "Role",
+            "location_label": "Créteil", "description": description,
+        })()
+        for index, description in enumerate(descriptions)
+    ))
+
+
+def test_expertnet_like_text_evidence_is_an_intermediary():
+    evidence = text_evidence(*(["Nous recrutons pour l'un de nos clients."] * 6 + ["Besoin direct"] * 4))
+    result = score_company_opportunity(opportunity(offers=10, roles=6, description_evidence=evidence), enrichment())
+    assert result.employer_relationship_status == EmployerRelationshipStatus.INTERMEDIARY
+    assert result.intermediary_description_evidence.strong_signal_offer_count == 6
+    assert result.subscores.direct_need == 20
+
+
+def test_multiple_offers_without_text_signal_stay_direct_employer():
+    result = score_company_opportunity(opportunity(offers=10, roles=6), enrichment())
+    assert result.employer_relationship_status == EmployerRelationshipStatus.DIRECT_EMPLOYER
+
+
+def test_one_explicit_client_offer_is_suspected_not_confirmed_intermediary():
+    evidence = text_evidence("Nous recrutons pour notre client.")
+    result = score_company_opportunity(opportunity(description_evidence=evidence), enrichment())
+    assert result.employer_relationship_status == EmployerRelationshipStatus.INTERMEDIARY_SUSPECTED
+    assert result.subscores.direct_need == 8
+
+
+def test_banal_client_word_is_not_a_false_positive():
+    evidence = text_evidence("La relation client est au cœur de ce poste. Notre agence vous accompagne.")
+    result = score_company_opportunity(opportunity(description_evidence=evidence), enrichment())
+    assert result.employer_relationship_status == EmployerRelationshipStatus.DIRECT_EMPLOYER
+
+
+def test_recruitment_firm_wording_is_a_strong_description_signal():
+    evidence = text_evidence("Cabinet de recrutement recrute pour son client.")
+    result = score_company_opportunity(opportunity(description_evidence=evidence), enrichment())
+    assert result.employer_relationship_status == EmployerRelationshipStatus.INTERMEDIARY_SUSPECTED
+    assert "recruitment_firm" in result.intermediary_description_evidence.marker_types
+
+
+def test_existing_generic_and_naf_structural_signals_remain_intermediaries():
+    generic = score_company_opportunity(opportunity(), enrichment(status=MatchStatus.GENERIC, confirmed=False))
+    naf = score_company_opportunity(opportunity(), enrichment(naf_code="78.10Z"))
+    assert generic.employer_relationship_status == EmployerRelationshipStatus.INTERMEDIARY
+    assert naf.employer_relationship_status == EmployerRelationshipStatus.INTERMEDIARY
+
+
+def test_multi_location_without_intermediation_text_stays_direct_employer():
+    result = score_company_opportunity(opportunity(offers=30, roles=10, multi_location=True), enrichment())
+    assert result.employer_relationship_status == EmployerRelationshipStatus.DIRECT_EMPLOYER
+
+
+def test_suspected_intermediary_has_moderate_penalty_without_direct_need_cap():
+    evidence = text_evidence("Nous recrutons pour notre client.")
+    suspected = score_company_opportunity(opportunity(offers=10, roles=6, description_evidence=evidence), enrichment())
+    direct = score_company_opportunity(opportunity(offers=10, roles=6), enrichment())
+    assert suspected.total_score == direct.total_score - 6
+    assert suspected.subscores.direct_need == direct.subscores.direct_need
+    assert any(item.code == "intermediary_suspected_penalty" for item in suspected.penalties)
+
+
+def test_suspected_intermediary_penalty_is_configurable():
+    evidence = text_evidence("Nous recrutons pour notre client.")
+    result = score_company_opportunity(
+        opportunity(description_evidence=evidence), enrichment(),
+        ScoringPolicy(intermediary_suspected_penalty=2),
+    )
+    assert any(item.code == "intermediary_suspected_penalty" and item.points == -2 for item in result.penalties)
+
+
+def test_confirmed_intermediary_keeps_existing_commercial_treatment():
+    result = score_company_opportunity(opportunity(offers=30, roles=10), enrichment(status=MatchStatus.GENERIC, confirmed=False))
+    assert result.subscores.direct_need == 20
+    assert result.subscores.commercial_relevance == 3
+    assert any(item.code == "generic_or_intermediary_penalty" for item in result.penalties)
+
+
+def test_description_classification_and_score_are_deterministic():
+    evidence = text_evidence("Pour le compte de notre client.", "Pour le compte de notre client.", "Autre offre.")
+    first = score_company_opportunity(opportunity(offers=3, description_evidence=evidence), enrichment())
+    second = score_company_opportunity(opportunity(offers=3, description_evidence=evidence), enrichment())
+    assert first == second

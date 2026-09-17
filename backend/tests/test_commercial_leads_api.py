@@ -38,12 +38,13 @@ def client(session):
     app.dependency_overrides.clear()
 
 
-def add_offer(session, identifier, company, *, department="94", title="Technicien", age_days=2, url=None):
+def add_offer(session, identifier, company, *, department="94", title="Technicien", age_days=2, url=None, description=None):
     session.add(ObservedJobOffer(
         source="france_travail",
         source_offer_id=identifier,
         title=title,
         company_name=company,
+        description=description,
         location_label="Créteil",
         commune="94028",
         department_code=department,
@@ -123,7 +124,7 @@ def test_list_contract_has_items_total_limit_and_offset(client, session):
     body = client.get("/api/v1/commercial-leads").json()
     assert set(body) == {"items", "total", "limit", "offset"}
     assert body["total"] == 3 and body["limit"] == 50 and body["offset"] == 0
-    assert {"company_key", "subscores", "evidence", "recommended_channel"} <= set(body["items"][0])
+    assert {"company_key", "subscores", "evidence", "recommended_channel", "employer_relationship_status", "intermediary_description_evidence"} <= set(body["items"][0])
 
 
 def test_default_list_excludes_ineligible_companies(client, session):
@@ -194,6 +195,14 @@ def test_missing_optional_values_are_null_or_empty(client, session):
 def test_not_found_dinum_company_is_returned(client, session):
     seed_leads(session)
     assert "SANS IDENTITE" in names(client.get("/api/v1/commercial-leads"))
+
+
+def test_api_exposes_suspected_intermediary_evidence(client, session):
+    add_offer(session, "suspected", "SUSPECTED", description="Nous recrutons pour notre client.")
+    session.commit()
+    item = client.get("/api/v1/commercial-leads").json()["items"][0]
+    assert item["employer_relationship_status"] == "intermediary_suspected"
+    assert item["intermediary_description_evidence"]["strong_signal_offer_count"] == 1
 
 
 def test_invalid_parameters_return_422(client, session):

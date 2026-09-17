@@ -78,6 +78,20 @@ def test_missing_dates_and_multiple_sources_do_not_mutate_original_offers(sessio
     assert (offer.first_seen_at, offer.last_seen_at, offer.observation_count, offer.is_active) == before
 
 
+def test_aggregates_conservative_intermediary_description_evidence(session):
+    _add(session, "1", company="Diffuseur", description="Cabinet de recrutement recrute pour son client.")
+    _add(session, "2", company="Diffuseur", description="Relation client et suivi des dossiers.")
+    session.commit()
+
+    opportunity = aggregate_active_company_opportunities(session, now=NOW).opportunities[0]
+
+    evidence = opportunity.intermediary_description_evidence
+    assert evidence.strong_signal_offer_count == 1
+    assert evidence.strong_signal_proportion == 0.5
+    assert evidence.marker_types == ("recruitment_firm",)
+    assert evidence.examples[0].offer_id == "source_a:1"
+
+
 def test_company_key_only_normalizes_trivial_spacing_case_and_punctuation():
     assert normalize_company_key(" ACME, SAS ") == normalize_company_key("acme sas")
     assert normalize_company_key("Acme SAS") != normalize_company_key("Acme SARL")
@@ -98,6 +112,7 @@ def _add(
     department="94",
     active=True,
     observations=1,
+    description=None,
 ):
     if created_at == "default":
         created_at = (NOW - timedelta(days=age_days)).isoformat().replace("+00:00", "Z")
@@ -106,6 +121,7 @@ def _add(
         source_offer_id=offer_id,
         title=title,
         company_name=company,
+        description=description,
         contract_type=contract,
         location_label=location_label,
         commune=commune,

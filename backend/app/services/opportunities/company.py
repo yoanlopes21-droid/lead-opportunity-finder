@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from statistics import median
 from typing import Optional, Sequence
@@ -13,6 +13,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import ObservedJobOffer
+from app.services.opportunities.intermediary import (
+    IntermediaryDescriptionEvidence,
+    analyze_intermediary_descriptions,
+)
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,9 @@ class CompanyOpportunity:
     average_offer_age_days: Optional[float]
     median_offer_age_days: Optional[float]
     signals: tuple[OpportunitySignal, ...]
+    intermediary_description_evidence: IntermediaryDescriptionEvidence = field(
+        default_factory=IntermediaryDescriptionEvidence
+    )
 
 
 @dataclass(frozen=True)
@@ -145,6 +152,7 @@ def _build_opportunity(
         OpportunitySignal("multi_location_signal", len(distinct_locations) >= 2, f"{len(distinct_locations)} lieu(x) distinct(s)."),
         OpportunitySignal("recurrent_observation_signal", any(offer.observation_count >= 2 for offer in offers), f"{sum(offer.observation_count >= 2 for offer in offers)} offre(s) observée(s) dans plusieurs runs."),
     )
+    intermediary_description_evidence = analyze_intermediary_descriptions(offers)
     return CompanyOpportunity(
         company_key=company_key,
         company_name=original_name,
@@ -171,6 +179,7 @@ def _build_opportunity(
         average_offer_age_days=round(sum(ages) / len(ages), 1) if ages else None,
         median_offer_age_days=round(float(median(ages)), 1) if ages else None,
         signals=signals,
+        intermediary_description_evidence=intermediary_description_evidence,
     )
 
 

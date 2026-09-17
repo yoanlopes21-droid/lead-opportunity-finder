@@ -18,6 +18,7 @@ from app.services.opportunities.company import (
     OpportunitySignal,
     aggregate_active_company_opportunities,
 )
+from app.services.opportunities.intermediary import IntermediaryDescriptionEvidence
 
 
 class ScoreCategory:
@@ -37,14 +38,21 @@ class ScoringPolicy:
     public_entity_penalty: int = 20
     intermediary_penalty: int = 15
     intermediary_direct_need_cap: int = 20
+    intermediary_suspected_penalty: int = 6
+    intermediary_text_minimum_offers: int = 3
+    intermediary_text_minimum_proportion: float = 0.30
 
     def __post_init__(self) -> None:
         if not 0 <= self.medium_threshold <= self.good_threshold <= self.very_high_threshold <= 100:
             raise ValueError("score category thresholds must be ordered between 0 and 100")
-        if self.public_entity_penalty < 0 or self.intermediary_penalty < 0:
+        if min(self.public_entity_penalty, self.intermediary_penalty, self.intermediary_suspected_penalty) < 0:
             raise ValueError("commercial penalties must not be negative")
         if not 0 <= self.intermediary_direct_need_cap <= 35:
             raise ValueError("intermediary direct need cap must be between 0 and 35")
+        if self.intermediary_text_minimum_offers < 2:
+            raise ValueError("intermediary text minimum offers must be at least 2")
+        if not 0 < self.intermediary_text_minimum_proportion <= 1:
+            raise ValueError("intermediary text minimum proportion must be between 0 and 1")
 
 
 @dataclass(frozen=True)
@@ -110,6 +118,22 @@ class CompanyScoringResult:
     commercial_adjustments: tuple[ScoreReason, ...]
     penalties: tuple[ScoreReason, ...]
     signals_used: tuple[OpportunitySignal, ...]
+    employer_relationship_status: str
+    employer_relationship_reasons: tuple[ScoreReason, ...]
+    intermediary_description_evidence: IntermediaryDescriptionEvidence
+
+
+class EmployerRelationshipStatus:
+    DIRECT_EMPLOYER = "direct_employer"
+    INTERMEDIARY_SUSPECTED = "intermediary_suspected"
+    INTERMEDIARY = "intermediary"
+
+
+@dataclass(frozen=True)
+class EmployerRelationshipAssessment:
+    status: str
+    reasons: tuple[ScoreReason, ...]
+    description_evidence: IntermediaryDescriptionEvidence
 
 
 def score_company_opportunity(
@@ -123,11 +147,13 @@ def score_company_opportunity(
     commercial_adjustments: list[ScoreReason] = []
     penalties: list[ScoreReason] = []
     active_signals = tuple(signal for signal in opportunity.signals if signal.active)
-    intermediary_signal = _intermediary_signal(opportunity.company_name, enrichment)
+    relationship = classify_employer_relationship(opportunity, enrichment, policy)
+    is_intermediary = relationship.status == EmployerRelationshipStatus.INTERMEDIARY
+    is_intermediary_suspected = relationship.status == EmployerRelationshipStatus.INTERMEDIARY_SUSPECTED
     public_signal = _public_signal(opportunity.company_name, enrichment)
 
     direct_need = _direct_need_score(opportunity, positive_reasons)
-    if intermediary_signal and direct_need > policy.intermediary_direct_need_cap:
+    if is_intermediary and direct_need > policy.intermediary_direct_need_cap:
         direct_need = policy.intermediary_direct_need_cap
         commercial_adjustments.append(ScoreReason(
             "intermediary_direct_need_cap",
@@ -137,7 +163,7 @@ def score_company_opportunity(
 
     latent_signals = _latent_signal_score(opportunity, positive_reasons)
     commercial_relevance = _commercial_relevance_score(
-        enrichment, public_signal is not None, intermediary_signal is not None, positive_reasons
+        enrichment, public_signal is not None, is_intermediary, positive_reasons
     )
     accessibility = _accessibility_score(opportunity, enrichment, positive_reasons)
     evidence_freshness = _evidence_freshness_score(opportunity, positive_reasons)
@@ -153,16 +179,18 @@ def score_company_opportunity(
             "Entité publique : adressabilité commerciale fortement réduite.",
             -policy.public_entity_penalty,
         ))
-    if intermediary_signal:
-        commercial_adjustments.append(ScoreReason(
-            f"intermediary_signal:{intermediary_signal}",
-            "Signal commercial d'intermédiaire détecté sans modifier l'enrichissement source.",
-            0,
-        ))
+    commercial_adjustments.extend(relationship.reasons)
+    if is_intermediary:
         penalties.append(ScoreReason(
             "generic_or_intermediary_penalty",
             "Intermédiaire ou recruteur identifié : faible probabilité de prospect client direct.",
             -policy.intermediary_penalty,
+        ))
+    elif is_intermediary_suspected:
+        penalties.append(ScoreReason(
+            "intermediary_suspected_penalty",
+            "Intermédiaire ou diffuseur possible : vérification recommandée avant prospection.",
+            -policy.intermediary_suspected_penalty,
         ))
     commercial_adjustments.append(_employee_range_adjustment(enrichment.employee_range))
 
@@ -190,6 +218,9 @@ def score_company_opportunity(
         commercial_adjustments=tuple(commercial_adjustments),
         penalties=tuple(penalties),
         signals_used=active_signals,
+        employer_relationship_status=relationship.status,
+        employer_relationship_reasons=relationship.reasons,
+        intermediary_description_evidence=relationship.description_evidence,
     )
 
 
@@ -354,7 +385,10 @@ def _add_if_positive(reasons: list[ScoreReason], code: str, message: str, points
 
 _SMALL_EMPLOYEE_RANGES = {"1-2", "3-5", "6-9", "10-19", "20-49"}
 _MEDIUM_EMPLOYEE_RANGES = {"50-99", "100-199", "200-249"}
+# Only aliases whose complete phrase is distinctive enough may match within a
+# longer publishing name. Any future short or ambiguous alias stays exact-only.
 _INTERMEDIARY_ALIASES = {"appel medical", "le cabrh"}
+_INTERMEDIARY_ALIASES_PHRASE_MATCH = {"appel medical", "le cabrh"}
 
 
 def _employee_range_adjustment(employee_range: Optional[str]) -> ScoreReason:
@@ -405,6 +439,70 @@ def _public_signal(company_name: str, enrichment: EnrichmentSnapshot) -> Optiona
     return None
 
 
+def classify_employer_relationship(
+    opportunity: CompanyOpportunity,
+    enrichment: EnrichmentSnapshot,
+    policy: ScoringPolicy = ScoringPolicy(),
+) -> EmployerRelationshipAssessment:
+    """Classify commercial relationship using structural facts before text evidence."""
+    structural_signal = _intermediary_signal(opportunity.company_name, enrichment)
+    evidence = opportunity.intermediary_description_evidence
+    if structural_signal:
+        return EmployerRelationshipAssessment(
+            status=EmployerRelationshipStatus.INTERMEDIARY,
+            reasons=(ScoreReason(
+                f"intermediary_signal:{structural_signal}",
+                "Signal commercial d'intermédiaire détecté sans modifier l'enrichissement source.",
+                0,
+            ),),
+            description_evidence=evidence,
+        )
+    if (
+        evidence.strong_signal_offer_count >= policy.intermediary_text_minimum_offers
+        and evidence.strong_signal_proportion >= policy.intermediary_text_minimum_proportion
+    ):
+        return EmployerRelationshipAssessment(
+            status=EmployerRelationshipStatus.INTERMEDIARY,
+            reasons=_description_reasons(evidence, confirmed=True),
+            description_evidence=evidence,
+        )
+    if evidence.strong_signal_offer_count:
+        return EmployerRelationshipAssessment(
+            status=EmployerRelationshipStatus.INTERMEDIARY_SUSPECTED,
+            reasons=_description_reasons(evidence, confirmed=False),
+            description_evidence=evidence,
+        )
+    return EmployerRelationshipAssessment(
+        status=EmployerRelationshipStatus.DIRECT_EMPLOYER,
+        reasons=(),
+        description_evidence=evidence,
+    )
+
+
+def _description_reasons(
+    evidence: IntermediaryDescriptionEvidence, confirmed: bool
+) -> tuple[ScoreReason, ...]:
+    marker_labels = ", ".join(evidence.marker_types)
+    count = evidence.strong_signal_offer_count
+    proportion = round(evidence.strong_signal_proportion * 100)
+    status_message = (
+        "Proportion significative de formulations explicites d'intermédiation."
+        if confirmed else "Formulation explicite d'intermédiation détectée : vérification recommandée."
+    )
+    return (
+        ScoreReason(
+            "intermediary_description_evidence",
+            f"{count} offre(s) sur {evidence.total_offer_count} ({proportion} %) : {status_message}",
+            0,
+        ),
+        ScoreReason(
+            "intermediary_description_markers",
+            f"Marqueurs textuels explicites : {marker_labels}.",
+            0,
+        ),
+    )
+
+
 def _intermediary_signal(company_name: str, enrichment: EnrichmentSnapshot) -> Optional[str]:
     if enrichment.match_status == MatchStatus.GENERIC:
         return "generic_or_intermediary"
@@ -413,6 +511,9 @@ def _intermediary_signal(company_name: str, enrichment: EnrichmentSnapshot) -> O
     normalized = _commercial_name_key(company_name)
     if normalized in _INTERMEDIARY_ALIASES:
         return f"alias_{normalized.replace(' ', '_')}"
+    for alias in sorted(_INTERMEDIARY_ALIASES_PHRASE_MATCH, key=len, reverse=True):
+        if _contains_commercial_phrase(normalized, alias):
+            return f"alias_{alias.replace(' ', '_')}"
     for marker in ("recrutement", "interim", "staffing"):
         if _contains_commercial_phrase(normalized, marker):
             return f"name_{marker}"
