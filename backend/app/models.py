@@ -275,3 +275,18 @@ class Exclusion(TimestampedModel, Base):
     exclusion_type: Mapped[str] = mapped_column(String(50))
     last_contact_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class CommercialExclusion(Base):
+    """An additive, auditable local exclusion for commercial lead eligibility."""
+
+    __tablename__ = "commercial_exclusions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    siren: Mapped[Optional[str]] = mapped_column(String(9), index=True)
+    company_name_snapshot: Mapped[str] = mapped_column(String(500))
+    exclusion_type: Mapped[str] = mapped_column(String(50), index=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
