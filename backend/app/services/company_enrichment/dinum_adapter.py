@@ -61,6 +61,18 @@ class DinumCompanyEnrichmentProvider:
             confirmed_identity=confirmed,
             suggested_identity=suggested,
             provider_source=self.source,
+            match_reasons=_distinct_strings(result.reasons),
+            match_signals=(
+                _distinct_strings(best_assessment.reasons) if best_assessment else ()
+            ),
+            suggested_entity_sector_type=(
+                best_assessment.candidate.entity_sector_type
+                if suggested is not None and best_assessment
+                else None
+            ),
+            candidate_aliases=(
+                sector_candidate.aliases if sector_candidate else ()
+            ),
         )
 
 
@@ -86,3 +98,7 @@ def _is_transient(error_type: str) -> bool:
     return error_type in {"timeout", "network_error", "rate_limited"} or (
         error_type.startswith("http_5")
     )
+
+
+def _distinct_strings(values: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(value for value in values if value))

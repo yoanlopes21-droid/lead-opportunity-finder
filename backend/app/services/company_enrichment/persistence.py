@@ -7,10 +7,15 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
-from app.models import CompanyEnrichment, EnrichmentRun
+from app.models import (
+    CompanyEnrichment,
+    CompanyEnrichmentDetail,
+    EnrichmentRun,
+    EnrichmentRunItem,
+)
 from app.services.company_enrichment.contracts import (
     MatchStatus,
     ProviderEnrichmentResult,
@@ -25,6 +30,12 @@ class EnrichmentRunStatus:
     COMPLETED = "completed"
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
+
+
+def ensure_enrichment_schema(engine: Engine) -> None:
+    """Add only complementary enrichment tables; never alter or rebuild existing ones."""
+    CompanyEnrichmentDetail.__table__.create(bind=engine, checkfirst=True)
+    EnrichmentRunItem.__table__.create(bind=engine, checkfirst=True)
 
 
 def create_enrichment_run(
@@ -130,6 +141,7 @@ def upsert_company_enrichment(
         _set_suggestion(row, result.suggested_identity, result.confidence_score)
 
     session.flush()
+    _upsert_enrichment_detail(session, row, result, attempted_at)
     return row
 
 
@@ -216,6 +228,34 @@ def _safe_error_message(message: Optional[str]) -> Optional[str]:
     if not message:
         return None
     return " ".join(message.split())[:500]
+
+
+def _upsert_enrichment_detail(
+    session: Session,
+    enrichment: CompanyEnrichment,
+    result: ProviderEnrichmentResult,
+    now: datetime,
+) -> CompanyEnrichmentDetail:
+    detail = session.scalar(
+        select(CompanyEnrichmentDetail).where(
+            CompanyEnrichmentDetail.enrichment_id == enrichment.id
+        )
+    )
+    if detail is None:
+        detail = CompanyEnrichmentDetail(enrichment_id=enrichment.id, updated_at=now)
+        session.add(detail)
+    suggestion = result.suggested_identity
+    detail.match_reasons = list(result.match_reasons)
+    detail.match_signals = list(result.match_signals)
+    detail.suggested_commune = suggestion.commune if suggestion else None
+    detail.suggested_postal_code = suggestion.postal_code if suggestion else None
+    detail.suggested_entity_sector_type = (
+        result.suggested_entity_sector_type if suggestion else None
+    )
+    detail.candidate_aliases = list(result.candidate_aliases)
+    detail.updated_at = now
+    session.flush()
+    return detail
 
 
 def _utc_now() -> datetime:

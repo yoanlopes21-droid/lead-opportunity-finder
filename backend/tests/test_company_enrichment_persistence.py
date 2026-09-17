@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.models import CompanyEnrichment
+from app.models import CompanyEnrichment, CompanyEnrichmentDetail, EnrichmentRun
 from app.services.company_enrichment.contracts import (
     LegalIdentity,
     MatchStatus,
@@ -17,6 +17,7 @@ from app.services.company_enrichment.persistence import (
     compute_input_fingerprint,
     create_enrichment_run,
     finish_enrichment_run,
+    ensure_enrichment_schema,
     is_fresh_reusable_high_confidence,
     upsert_company_enrichment,
 )
@@ -214,3 +215,65 @@ def test_provider_error_never_retains_raw_potentially_sensitive_message():
     assert error.error_type == "timeout_invalid"
     assert error.safe_message == "Provider request failed (timeout_invalid)."
     assert "do-not-store" not in str(error)
+
+
+def test_matching_evidence_and_suggested_candidate_details_are_persisted(session):
+    item = opportunity()
+    run = create_enrichment_run(session, "dinum", 1, now=at(16))
+    enriched = result(
+        MatchStatus.REVIEW_NEEDED,
+        match_reasons=("Nom exact.", "Commune cohérente."),
+        match_signals=("name_exact", "commune_match"),
+        suggested_entity_sector_type="private",
+        candidate_aliases=("ACME", "ACME FRANCE"),
+    )
+
+    row = upsert_company_enrichment(
+        session, run, item, enriched, compute_input_fingerprint(item), now=at(16, 9)
+    )
+    detail = session.scalar(
+        select(CompanyEnrichmentDetail).where(
+            CompanyEnrichmentDetail.enrichment_id == row.id
+        )
+    )
+
+    assert detail.match_reasons == ["Nom exact.", "Commune cohérente."]
+    assert detail.match_signals == ["name_exact", "commune_match"]
+    assert detail.suggested_commune == "Créteil"
+    assert detail.suggested_postal_code == "94000"
+    assert detail.suggested_entity_sector_type == "private"
+    assert detail.candidate_aliases == ["ACME", "ACME FRANCE"]
+    assert row.siren is None
+
+
+def test_complementary_schema_evolution_preserves_old_enrichments(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'old-schema.sqlite3'}")
+    Base.metadata.create_all(
+        engine,
+        tables=[EnrichmentRun.__table__, CompanyEnrichment.__table__],
+    )
+    with Session(engine) as old_session:
+        old_run = EnrichmentRun(
+            provider="dinum", started_at=at(1), finished_at=at(1, 9),
+            status="failed", selected_count=120, processed_count=117,
+        )
+        old_session.add(old_run)
+        old_session.flush()
+        old_session.add(CompanyEnrichment(
+            company_key="legacy", source_company_name="Legacy", provider="dinum",
+            match_status=MatchStatus.NOT_FOUND, entity_sector_type="unknown",
+            last_attempt_at=at(1), attempt_count=1, input_fingerprint="a" * 64,
+            last_run_id=old_run.id,
+        ))
+        old_session.commit()
+
+    ensure_enrichment_schema(engine)
+
+    assert {"company_enrichment_details", "enrichment_run_items"}.issubset(
+        set(inspect(engine).get_table_names())
+    )
+    with Session(engine) as migrated_session:
+        assert migrated_session.query(CompanyEnrichment).count() == 1
+        assert migrated_session.query(EnrichmentRun).one().status == "failed"
+        assert migrated_session.query(CompanyEnrichmentDetail).count() == 0
+    engine.dispose()

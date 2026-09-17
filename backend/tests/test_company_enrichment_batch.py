@@ -2,11 +2,18 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.models import CompanyEnrichment, EnrichmentRun
-from app.services.company_enrichment.batch import BatchPolicy, CompanyEnrichmentBatchOrchestrator
+from app.models import CompanyEnrichment, EnrichmentRun, EnrichmentRunItem
+from app.services.company_enrichment.batch import (
+    BatchPolicy,
+    CompanyEnrichmentBatchOrchestrator,
+    RunItemStatus,
+)
+from app.cli.enrichment import execute_cli
 from app.services.company_enrichment.contracts import (
     LegalIdentity,
     MatchStatus,
@@ -277,6 +284,8 @@ def test_dinum_adapter_maps_confirmed_identity_without_leaking_provider_structur
     assert result.confirmed_identity.siren == "123456789"
     assert result.confirmed_identity.commune == "Créteil"
     assert result.entity_sector_type == "private"
+    assert result.match_reasons
+    assert result.match_signals
 
 
 def test_dinum_adapter_marks_429_as_transient_without_exposing_http_details():
@@ -289,3 +298,146 @@ def test_dinum_adapter_marks_429_as_transient_without_exposing_http_details():
 
     assert raised.value.error_type == "rate_limited"
     assert raised.value.transient is True
+
+
+def test_run_selection_is_durable_and_unique_before_processing(session):
+    runner, _ = orchestrator(FakeProvider({}))
+
+    run = runner.create_run(session, [opportunity(), opportunity(name="duplicate")])
+    items = session.scalars(select(EnrichmentRunItem)).all()
+
+    assert run.selected_count == 1
+    assert len(items) == 1
+    assert items[0].status == RunItemStatus.PENDING
+    assert items[0].input_snapshot["company_name"] == "ACME"
+    duplicate = EnrichmentRunItem(
+        run_id=run.id, company_key="acme", source_company_name="ACME",
+        selection_position=1, input_snapshot=items[0].input_snapshot,
+        input_fingerprint=items[0].input_fingerprint, status=RunItemStatus.PENDING,
+    )
+    session.add(duplicate)
+    with pytest.raises(IntegrityError):
+        session.flush()
+    session.rollback()
+
+
+def test_same_failed_run_resumes_pending_and_orphan_processing_only(session):
+    first_item, second_item = opportunity("first", "First"), opportunity("second", "Second")
+    provider = FakeProvider({"first": [high()], "second": [KeyboardInterrupt()]})
+    runner, _ = orchestrator(provider, now=at(1))
+
+    with pytest.raises(KeyboardInterrupt):
+        runner.run(session, [first_item, second_item])
+
+    run = session.scalar(select(EnrichmentRun))
+    before = session.scalars(
+        select(EnrichmentRunItem).order_by(EnrichmentRunItem.selection_position)
+    ).all()
+    assert run.status == EnrichmentRunStatus.FAILED
+    assert [item.status for item in before] == [RunItemStatus.COMPLETED, RunItemStatus.PROCESSING]
+    assert run.selected_count == 2
+
+    resume_provider = FakeProvider({"second": [high()]})
+    resumed, _ = orchestrator(resume_provider, now=at(2))
+    resumed_run = resumed.resume(session, run.id)
+    after = session.scalars(
+        select(EnrichmentRunItem).order_by(EnrichmentRunItem.selection_position)
+    ).all()
+
+    assert resumed_run.status == EnrichmentRunStatus.COMPLETED
+    assert resume_provider.calls == ["second"]
+    assert [item.status for item in after] == [RunItemStatus.COMPLETED, RunItemStatus.COMPLETED]
+    assert after[1].attempt_count == 2
+    assert resumed_run.selected_count == resumed_run.processed_count == 2
+
+
+def test_cached_item_is_durable_and_not_reprocessed_on_resume(session):
+    item = opportunity()
+    first, _ = orchestrator(FakeProvider({"acme": [high()]}), now=at(1))
+    first.run(session, [item])
+    provider = FakeProvider({"acme": [AssertionError("must remain cached")]})
+    second, _ = orchestrator(provider, now=at(2))
+    run = second.run(session, [item])
+    run_item = session.scalar(
+        select(EnrichmentRunItem).where(EnrichmentRunItem.run_id == run.id)
+    )
+
+    assert run_item.status == RunItemStatus.CACHED
+    assert run_item.attempt_count == 0
+    second.resume(session, run.id)
+    assert provider.calls == []
+
+
+def test_cli_resume_uses_simulated_provider_and_logs_only_counts(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'cli.sqlite3'}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    provider = FakeProvider({"acme": [high()]})
+    with factory() as setup_session:
+        runner, _ = orchestrator(provider)
+        run = runner.create_run(setup_session, [opportunity()])
+        run_id = run.id
+    output = []
+
+    code = execute_cli(
+        ["resume", "--run-id", str(run_id)],
+        session_factory=factory,
+        provider=provider,
+        output=output.append,
+        prepare_schema=False,
+    )
+
+    assert code == 0
+    assert provider.calls == ["acme"]
+    rendered = "\n".join(output)
+    assert "processed=1/1" in rendered
+    assert "client_secret" not in rendered.casefold()
+    assert "token" not in rendered.casefold()
+    assert "ACME" not in rendered
+    engine.dispose()
+
+
+def test_legacy_failed_run_without_items_is_not_modified(session):
+    run = EnrichmentRun(
+        provider="fake", started_at=at(1), finished_at=at(1, 9), status="failed",
+        selected_count=120, processed_count=117,
+    )
+    session.add(run)
+    session.commit()
+    runner, _ = orchestrator(FakeProvider({}))
+
+    with pytest.raises(ValueError, match="predates durable run items"):
+        runner.resume(session, run.id)
+
+    session.refresh(run)
+    assert run.status == "failed"
+    assert run.selected_count == 120 and run.processed_count == 117
+
+
+def test_systemic_failure_resume_processes_pending_but_not_error_items(session):
+    items = [opportunity(str(index), f"Company {index}") for index in range(4)]
+    first_provider = FakeProvider({
+        item.company_key: [ProviderCallError("http_503", True)] for item in items
+    })
+    first, _ = orchestrator(
+        first_provider, max_retries=0, systemic_error_threshold=2, now=at(1)
+    )
+    failed_run = first.run(session, items)
+    assert failed_run.status == EnrichmentRunStatus.FAILED
+
+    resume_provider = FakeProvider({"2": [high()], "3": [high()]})
+    resumed, _ = orchestrator(resume_provider, now=at(2))
+    final_run = resumed.resume(session, failed_run.id)
+    states = session.scalars(
+        select(EnrichmentRunItem)
+        .where(EnrichmentRunItem.run_id == failed_run.id)
+        .order_by(EnrichmentRunItem.selection_position)
+    ).all()
+
+    assert resume_provider.calls == ["2", "3"]
+    assert [item.status for item in states] == [
+        RunItemStatus.ERROR, RunItemStatus.ERROR,
+        RunItemStatus.COMPLETED, RunItemStatus.COMPLETED,
+    ]
+    assert final_run.status == EnrichmentRunStatus.COMPLETED_WITH_ERRORS
+    assert final_run.selected_count == final_run.processed_count == 4

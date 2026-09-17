@@ -166,6 +166,50 @@ class CompanyEnrichment(Base):
     )
 
 
+class CompanyEnrichmentDetail(Base):
+    """Provider-neutral explanation attached to the latest enrichment state."""
+
+    __tablename__ = "company_enrichment_details"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    enrichment_id: Mapped[int] = mapped_column(
+        ForeignKey("company_enrichments.id"), unique=True, index=True
+    )
+    match_reasons: Mapped[list] = mapped_column(JSON, default=list)
+    match_signals: Mapped[list] = mapped_column(JSON, default=list)
+    suggested_commune: Mapped[Optional[str]] = mapped_column(String(255))
+    suggested_postal_code: Mapped[Optional[str]] = mapped_column(String(10))
+    suggested_entity_sector_type: Mapped[Optional[str]] = mapped_column(String(20))
+    candidate_aliases: Mapped[list] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class EnrichmentRunItem(Base):
+    """Durable membership and progress state for one enrichment batch item."""
+
+    __tablename__ = "enrichment_run_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("enrichment_runs.id"), index=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    source_company_name: Mapped[str] = mapped_column(String(500))
+    selection_position: Mapped[int] = mapped_column(Integer)
+    input_snapshot: Mapped[dict] = mapped_column(JSON)
+    input_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    match_status: Mapped[Optional[str]] = mapped_column(String(40))
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    enrichment_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("company_enrichments.id"), index=True
+    )
+    last_error_type: Mapped[Optional[str]] = mapped_column(String(100))
+    last_error_message: Mapped[Optional[str]] = mapped_column(String(500))
+    __table_args__ = (
+        UniqueConstraint("run_id", "company_key", name="uq_enrichment_run_item_company"),
+        UniqueConstraint("run_id", "selection_position", name="uq_enrichment_run_item_position"),
+    )
+
+
 class Contact(TimestampedModel, Base):
     __tablename__ = "contacts"
     id: Mapped[int] = mapped_column(primary_key=True)

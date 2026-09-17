@@ -52,6 +52,10 @@ class ProviderEnrichmentResult:
     confirmed_identity: Optional[LegalIdentity] = None
     suggested_identity: Optional[LegalIdentity] = None
     provider_source: Optional[str] = None
+    match_reasons: tuple[str, ...] = ()
+    match_signals: tuple[str, ...] = ()
+    suggested_entity_sector_type: Optional[str] = None
+    candidate_aliases: tuple[str, ...] = ()
 
 
 class ProviderCallError(Exception):
