@@ -10,8 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.models import ContactEvidence, ContactPoint, PersonContact
 from app.services.contactability.contracts import (
+    ContactEvidenceCandidate,
     ContactEvidenceInput,
+    ContactPointCandidate,
     ContactPointInput,
+    ContactProviderResult,
+    PersonContactCandidate,
     PersonContactInput,
     VALID_CONTACT_CONFIDENCES,
     VALID_CONTACT_SCOPES,
@@ -35,6 +39,15 @@ def ensure_contactability_schema(engine: Engine) -> None:
     PersonContact.__table__.create(bind=engine, checkfirst=True)
     ContactPoint.__table__.create(bind=engine, checkfirst=True)
     ContactEvidence.__table__.create(bind=engine, checkfirst=True)
+
+
+def persist_contact_provider_result(
+    session: Session, result: ContactProviderResult,
+) -> tuple[tuple[ContactPoint, ...], tuple[PersonContact, ...]]:
+    """Persist generic, already-sourced provider candidates without raw payloads."""
+    people = tuple(_upsert_person_candidate(session, item) for item in result.person_candidates)
+    points = tuple(_upsert_point_candidate(session, item) for item in result.candidates)
+    return points, people
 
 
 def upsert_person_contact(session: Session, item: PersonContactInput) -> PersonContact:
@@ -284,3 +297,62 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _upsert_person_candidate(session: Session, item: PersonContactCandidate) -> PersonContact:
+    observed_at = max(evidence.observed_at for evidence in item.evidence)
+    row = upsert_person_contact(session, PersonContactInput(
+        company_key=item.company_key,
+        organization_name_snapshot=item.organization_name_snapshot,
+        scope=item.scope,
+        full_name=item.full_name,
+        relevance_role=item.relevance_role,
+        confidence_level=item.confidence_level,
+        verification_status=item.verification_status,
+        observed_at=observed_at,
+        local_key=item.local_key,
+        siren=item.siren,
+        local_commune_snapshot=item.local_commune_snapshot,
+        local_location_label_snapshot=item.local_location_label_snapshot,
+        job_title=item.job_title,
+        attribution_reason=item.attribution_reason,
+    ))
+    _add_candidate_evidence(session, item.evidence, person_contact_id=row.id)
+    return row
+
+
+def _upsert_point_candidate(session: Session, item: ContactPointCandidate) -> ContactPoint:
+    observed_at = max(evidence.observed_at for evidence in item.evidence)
+    row = upsert_contact_point(session, ContactPointInput(
+        company_key=item.company_key,
+        organization_name_snapshot=item.organization_name_snapshot,
+        scope=item.scope,
+        contact_type=item.contact_type,
+        value=item.value,
+        confidence_level=item.confidence_level,
+        verification_status=item.verification_status,
+        observed_at=observed_at,
+        local_key=item.local_key,
+        siren=item.siren,
+        local_commune_snapshot=item.local_commune_snapshot,
+        local_location_label_snapshot=item.local_location_label_snapshot,
+        attribution_reason=item.attribution_reason,
+    ))
+    _add_candidate_evidence(session, item.evidence, contact_point_id=row.id)
+    return row
+
+
+def _add_candidate_evidence(
+    session: Session, evidence_items: tuple[ContactEvidenceCandidate, ...],
+    *, contact_point_id: Optional[int] = None, person_contact_id: Optional[int] = None,
+) -> None:
+    for evidence in evidence_items:
+        add_contact_evidence(session, ContactEvidenceInput(
+            provider=evidence.provider,
+            source_name=evidence.source_name,
+            observed_at=evidence.observed_at,
+            source_url=evidence.source_url,
+            source_identifier=evidence.source_identifier,
+            evidence_reason=evidence.evidence_reason,
+            excerpt=evidence.excerpt,
+        ), contact_point_id=contact_point_id, person_contact_id=person_contact_id)

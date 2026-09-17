@@ -376,3 +376,77 @@ class ContactEvidence(Base):
             name="ck_contact_evidence_exactly_one_target",
         ),
     )
+
+
+class ContactEnrichmentRun(Base):
+    """Durable execution record for a contact provider batch."""
+
+    __tablename__ = "contact_enrichment_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(120), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(40), default="running", index=True)
+    selected_count: Mapped[int] = mapped_column(Integer, default=0)
+    processed_count: Mapped[int] = mapped_column(Integer, default=0)
+    cached_count: Mapped[int] = mapped_column(Integer, default=0)
+    completed_count: Mapped[int] = mapped_column(Integer, default=0)
+    not_found_count: Mapped[int] = mapped_column(Integer, default=0)
+    not_applicable_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    external_call_count: Mapped[int] = mapped_column(Integer, default=0)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ContactEnrichmentRunItem(Base):
+    """Persisted, minimal target snapshot for one contact enrichment run."""
+
+    __tablename__ = "contact_enrichment_run_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("contact_enrichment_runs.id"), index=True)
+    deterministic_position: Mapped[int] = mapped_column(Integer)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    target_scope: Mapped[str] = mapped_column(String(30), index=True)
+    siren: Mapped[Optional[str]] = mapped_column(String(9), index=True)
+    local_key: Mapped[Optional[str]] = mapped_column(String(500), index=True)
+    organization_name_snapshot: Mapped[str] = mapped_column(String(500))
+    target_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    input_snapshot: Mapped[dict] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error_type: Mapped[Optional[str]] = mapped_column(String(100))
+    last_error_message: Mapped[Optional[str]] = mapped_column(String(500))
+    __table_args__ = (
+        UniqueConstraint("run_id", "deterministic_position", name="uq_contact_run_item_position"),
+        UniqueConstraint("run_id", "target_fingerprint", name="uq_contact_run_item_target"),
+    )
+
+
+class ContactProviderState(Base):
+    """Freshness and outcome cache for one provider target resource."""
+
+    __tablename__ = "contact_provider_states"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(120), index=True)
+    target_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    resource: Mapped[str] = mapped_column(String(80), index=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    target_scope: Mapped[str] = mapped_column(String(30), index=True)
+    siren: Mapped[Optional[str]] = mapped_column(String(9), index=True)
+    local_key: Mapped[Optional[str]] = mapped_column(String(500), index=True)
+    last_attempt_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    last_status: Mapped[str] = mapped_column(String(40), index=True)
+    fresh_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    result_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error_type: Mapped[Optional[str]] = mapped_column(String(100))
+    last_error_message: Mapped[Optional[str]] = mapped_column(String(500))
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "target_fingerprint", "resource",
+            name="uq_contact_provider_state_resource",
+        ),
+    )

@@ -155,6 +155,7 @@ class SocieteComContactProvider:
     """Map structured API facts only for an already-confirmed company identity."""
 
     name = PROVIDER_NAME
+    resources = ("contact", "directors")
 
     def __init__(
         self,
@@ -179,6 +180,87 @@ class SocieteComContactProvider:
         self.policy = policy
         self._now = now
         self._base_url = base_url.rstrip("/")
+
+    @property
+    def is_configured(self) -> bool:
+        return self._token is not None
+
+    def target_fingerprint(self, target: ContactTarget) -> str:
+        return societe_com_target_fingerprint(target)
+
+    def inapplicability_reason(self, target: ContactTarget) -> Optional[str]:
+        return societe_com_inapplicability_reason(target)
+
+    def resource_ttl(self, resource: str, status: str) -> timedelta:
+        if status == ContactProviderStatus.NOT_FOUND:
+            return timedelta(days=30)
+        if resource == "contact":
+            return self.policy.contact_ttl
+        if resource == "directors":
+            return self.policy.directors_ttl
+        raise ValueError("unknown Societe.com contact resource")
+
+    def discover_resource(
+        self, target: ContactTarget, resource: str,
+    ) -> ContactProviderResult:
+        """Discover exactly one paid resource so the batch can cache it independently."""
+        if resource not in self.resources:
+            raise ValueError("unknown Societe.com contact resource")
+        attempted_at = self._now()
+        fingerprint = self.target_fingerprint(target)
+        if not self.is_configured:
+            return _empty_result(
+                ContactProviderStatus.NOT_CONFIGURED, fingerprint, attempted_at,
+                warning="societe_com_token_not_configured",
+            )
+        reason = self.inapplicability_reason(target)
+        if reason is not None:
+            return _empty_result(
+                ContactProviderStatus.NOT_APPLICABLE, fingerprint, attempted_at,
+                warning=reason,
+            )
+        assert self._client is not None and target.siren is not None
+        try:
+            payload = (
+                self._client.fetch_contact(target.siren)
+                if resource == "contact"
+                else self._client.fetch_directors(target.siren)
+            )
+        except SocieteComClientError as exc:
+            return ContactProviderResult(
+                provider=self.name,
+                status=ContactProviderStatus.ERROR,
+                warnings=(f"societe_com_{exc.kind}",),
+                metadata=ContactProviderAttemptMetadata(
+                    target_fingerprint=fingerprint,
+                    attempted_at=attempted_at,
+                    request_count=1,
+                    error_type=exc.kind,
+                ),
+            )
+        if resource == "contact":
+            candidates, warnings = self._contact_candidates(
+                target, _unwrap_record(payload), attempted_at,
+            )
+            return ContactProviderResult(
+                provider=self.name,
+                status=(ContactProviderStatus.COMPLETED if candidates else ContactProviderStatus.NOT_FOUND),
+                candidates=candidates,
+                warnings=tuple(warnings),
+                metadata=ContactProviderAttemptMetadata(
+                    target_fingerprint=fingerprint, attempted_at=attempted_at, request_count=1,
+                ),
+            )
+        persons, warnings = self._director_candidates(target, payload, attempted_at)
+        return ContactProviderResult(
+            provider=self.name,
+            status=(ContactProviderStatus.COMPLETED if persons else ContactProviderStatus.NOT_FOUND),
+            person_candidates=persons,
+            warnings=tuple(warnings),
+            metadata=ContactProviderAttemptMetadata(
+                target_fingerprint=fingerprint, attempted_at=attempted_at, request_count=1,
+            ),
+        )
 
     @classmethod
     def from_settings(
@@ -388,6 +470,7 @@ def societe_com_target_fingerprint(target: ContactTarget) -> str:
     payload = {
         "provider": PROVIDER_NAME,
         "company_key": normalize_generic(target.company_key),
+        "organization_name": normalize_generic(target.organization_name_snapshot),
         "scope": target.scope,
         "siren": target.siren,
         "identity_match_status": target.identity_match_status,

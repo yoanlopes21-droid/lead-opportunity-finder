@@ -297,3 +297,14 @@ def test_target_fingerprint_and_ttls_are_stable_and_cost_aware():
     policy = SocieteComPolicy()
     assert policy.contact_ttl == timedelta(days=30)
     assert timedelta(days=60) <= policy.directors_ttl <= timedelta(days=90)
+
+
+def test_resource_discovery_calls_only_the_requested_paid_route():
+    fake = FakeClient(contact=contact_payload(), directors={"dirigeants": []})
+    selected = provider(fake)
+    contact = selected.discover_resource(target(), "contact")
+    assert contact.status == ContactProviderStatus.COMPLETED
+    assert fake.calls == [("contact", "123456789")]
+    directors = selected.discover_resource(target(), "directors")
+    assert directors.status == ContactProviderStatus.NOT_FOUND
+    assert fake.calls == [("contact", "123456789"), ("directors", "123456789")]
