@@ -452,6 +452,26 @@ class ContactProviderState(Base):
     )
 
 
+class BraveUsageEvent(Base):
+    """Minimal, auditable local ledger for Brave Search request budget."""
+
+    __tablename__ = "brave_usage_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(80), default="brave_search", index=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    billing_period: Mapped[str] = mapped_column(String(7), index=True)
+    run_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    company_key: Mapped[Optional[str]] = mapped_column(String(500), index=True)
+    query_fingerprint: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    request_index: Mapped[Optional[int]] = mapped_column(Integer)
+    outcome: Mapped[str] = mapped_column(String(80), index=True)
+    counted_for_budget: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    source: Mapped[str] = mapped_column(String(80), index=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    adjustment_key: Mapped[Optional[str]] = mapped_column(String(120), unique=True)
+    note: Mapped[Optional[str]] = mapped_column(String(500))
+
+
 class WebsiteCandidateRecord(Base):
     """Minimal domain-discovery artifact; never stores a search payload."""
 

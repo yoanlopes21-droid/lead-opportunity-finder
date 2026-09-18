@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.database import Base, engine
 from app import models  # noqa: F401 - registers metadata
 from app.api.commercial_leads import router as commercial_leads_router
+from app.api.brave_usage import router as brave_usage_router
 from app.schemas import AppSummary, FranceTravailAuthCheckResponse, HealthResponse
 from app.services.france_travail.auth import FranceTravailAuthError, FranceTravailOAuthClient
 
@@ -32,6 +33,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(commercial_leads_router)
+app.include_router(brave_usage_router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse, tags=["system"])

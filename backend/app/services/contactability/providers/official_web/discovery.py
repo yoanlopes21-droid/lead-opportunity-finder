@@ -10,6 +10,7 @@ from typing import Optional, Sequence
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.services.contactability.contracts import ContactScope, ContactTarget
+from app.services.brave_usage import BraveBudgetExceeded
 from app.services.contactability.normalization import normalize_generic, normalize_url
 from app.services.contactability.providers.official_web.contracts import (
     BraveSearchResult,
@@ -79,7 +80,13 @@ def discover_website_candidates(
 
     for query_index, query in enumerate(discovery_queries(target), start=1):
         search_calls += 1
-        results = brave_client.search(query, count=5)
+        try:
+            results = brave_client.search(
+                query, count=5, company_key=target.company_key, request_index=query_index,
+            )
+        except BraveBudgetExceeded as exc:
+            warnings.append(exc.kind)
+            break
         for rank, result in enumerate(results, start=1):
             candidate = _candidate_from_search(
                 target, target_fingerprint, query, query_index, rank, result, observed_at,

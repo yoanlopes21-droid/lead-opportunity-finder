@@ -32,6 +32,7 @@ from app.services.contactability.providers.official_web.provider import (
 )
 from app.services.contactability.providers.official_web.verification import verify_website_candidates
 from app.services.contactability.providers.official_web.robots import RobotsTxtPolicy
+from app.services.brave_usage import BraveBudgetPolicy, BraveUsageService
 
 
 NOW = datetime(2026, 9, 18, 10, tzinfo=timezone.utc)
@@ -56,7 +57,7 @@ class FakeBrave:
         self.batches = list(batches)
         self.queries = []
 
-    def search(self, query, count=5):
+    def search(self, query, count=5, **kwargs):
         self.queries.append((query, count))
         return tuple(self.batches.pop(0))
 
@@ -157,14 +158,17 @@ def test_deduplicates_same_domain_and_rejects_jobboards_and_socials():
     assert classify_domain("linkedin.com")[0] == WebsiteCandidateClassification.EXCLUDED
 
 
-def test_brave_client_keeps_only_five_and_never_exposes_key():
+def test_brave_client_keeps_only_five_and_never_exposes_key(session):
     seen = {}
     def requester(url, **kwargs):
         seen.update(kwargs)
         return Response(payload={"web": {"results": [
             {"url": f"https://site{i}.example", "title": f"Site {i}"} for i in range(8)
         ]}})
-    client = BraveSearchClient(api_key="top-secret", requester=requester, sleeper=lambda _: None)
+    client = BraveSearchClient(
+        api_key="top-secret", requester=requester, sleeper=lambda _: None,
+        usage_service=BraveUsageService(session, BraveBudgetPolicy(), now=lambda: NOW),
+    )
     results = client.search("acme", count=99)
     assert len(results) == 5 and seen["params"]["count"] == 5
     assert "top-secret" not in repr(results)

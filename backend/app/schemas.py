@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel
@@ -15,6 +16,23 @@ class AppSummary(BaseModel):
     external_connectors_enabled: int
     contact_automation_enabled: bool
     generated_at: datetime
+
+
+class BraveUsageResponse(BaseModel):
+    monthly_budget: int
+    monthly_used: int
+    monthly_remaining: int
+    percentage_used: Decimal
+    estimated_cost_used_usd: Decimal
+    estimated_credit_remaining_usd: Decimal
+    project_total_requests: int
+    current_period_start: datetime
+    current_period_end: datetime
+    days_remaining_in_period: int
+    default_run_cap: int
+    maximum_allowed_for_next_run: int
+    pacing_per_day: Decimal
+    status: str
 
 
 class FranceTravailAuthCheckResponse(BaseModel):

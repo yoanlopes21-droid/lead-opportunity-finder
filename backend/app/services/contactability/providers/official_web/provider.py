@@ -87,6 +87,10 @@ class OfficialWebProvider:
     def target_fingerprint(self, target: ContactTarget) -> str:
         return official_web_target_fingerprint(target)
 
+    def set_run_id(self, run_id: Optional[int]) -> None:
+        if self.brave_client is not None and hasattr(self.brave_client, "set_run_id"):
+            self.brave_client.set_run_id(run_id)
+
     def inapplicability_reason(self, target: ContactTarget) -> Optional[str]:
         return None
 

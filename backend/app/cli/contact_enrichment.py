@@ -34,6 +34,8 @@ from app.services.contactability.providers.official_web.provider import Official
 from app.services.contactability.targets import ContactIdentityContext, build_contact_targets
 from app.services.contactability.contracts import ContactScope, ContactTarget
 from app.services.contactability.persistence import ensure_contactability_schema
+from app.services.brave_usage import BraveBudgetPolicy, BraveUsageService, ensure_brave_usage_schema
+from app.services.contactability.providers.official_web.brave_client import BraveSearchClient
 from app.services.opportunities.company import normalize_company_key
 
 
@@ -123,15 +125,29 @@ def offer_description_website_seeds(
 
 
 def official_web_provider(session: Session) -> OfficialWebProvider:
-    """Build the provider with real protected HTTP but no Brave client."""
+    """Build the provider with protected HTTP and budget-guarded optional Brave."""
     settings = get_settings()
     fetcher = SecureWebFetcher(
         timeout_seconds=settings.official_web_fetch_timeout_seconds,
         requests_per_second_per_domain=settings.official_web_fetch_requests_per_second,
         max_response_bytes=settings.official_web_max_response_bytes,
     )
+    policy = BraveBudgetPolicy(
+        monthly_request_budget=settings.brave_search_monthly_request_budget,
+        default_run_hard_cap=settings.brave_search_default_run_hard_cap,
+        estimated_price_per_1000_usd=settings.brave_search_estimated_price_per_1000_usd,
+        estimated_monthly_free_credit_usd=settings.brave_search_estimated_monthly_free_credit_usd,
+    )
+    brave_client = None
+    if settings.brave_search_api_key:
+        brave_client = BraveSearchClient(
+            api_key=settings.brave_search_api_key.get_secret_value(),
+            base_url=settings.brave_search_api_url, timeout_seconds=settings.brave_search_timeout_seconds,
+            requests_per_second=settings.brave_search_requests_per_second,
+            usage_service=BraveUsageService(session, policy), run_hard_cap=policy.default_run_hard_cap,
+        )
     return OfficialWebProvider(
-        repository=OfficialWebRepository(session), fetcher=fetcher, brave_client=None,
+        repository=OfficialWebRepository(session), fetcher=fetcher, brave_client=brave_client,
         seed_loader=lambda target: offer_description_website_seeds(session, target),
     )
 
@@ -161,6 +177,7 @@ def execute_cli(
         if args.command == "new" and args.provider == "official_web":
             ensure_contactability_schema(engine)
             ensure_official_web_schema(engine)
+            ensure_brave_usage_schema(engine)
 
     def progress(run) -> None:
         output(_progress_line(run))

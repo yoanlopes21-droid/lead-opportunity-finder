@@ -152,6 +152,9 @@ class ContactEnrichmentBatchOrchestrator:
             raise ValueError("contact enrichment run does not exist")
         if run.provider != self._provider.name:
             raise ValueError("contact enrichment run provider does not match")
+        set_run_id = getattr(self._provider, "set_run_id", None)
+        if set_run_id is not None:
+            set_run_id(run.id)
         items = self._items(session, run.id)
         self._validate_selection(run, items)
         self._synchronize_run_counts(run, items)

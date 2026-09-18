@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from decimal import Decimal
 from typing import Optional
 
 from pydantic import SecretStr
@@ -36,6 +37,10 @@ class Settings(BaseSettings):
     brave_search_api_url: str = "https://api.search.brave.com/res/v1/web/search"
     brave_search_timeout_seconds: float = 10.0
     brave_search_requests_per_second: float = 1.0
+    brave_search_monthly_request_budget: int = 1000
+    brave_search_default_run_hard_cap: int = 40
+    brave_search_estimated_price_per_1000_usd: Decimal = Decimal("5.0")
+    brave_search_estimated_monthly_free_credit_usd: Decimal = Decimal("5.0")
     official_web_fetch_timeout_seconds: float = 10.0
     official_web_fetch_requests_per_second: float = 1.0
     official_web_max_response_bytes: int = 1_048_576
