@@ -39,6 +39,12 @@ _EXCLUDED_DOMAINS = {
     "pagesjaunes.fr": "directory",
     "annuaire-entreprises.data.gouv.fr": "directory",
 }
+_THIRD_PARTY_DOMAIN_MARKERS = {
+    "annuaire": "directory", "rubypayeur": "financial_directory", "pappers": "legal_data",
+    "societe": "legal_data", "verif": "legal_data", "manageo": "company_scoring",
+    "infogreffe": "legal_data", "score": "company_scoring", "profile": "profile_marketplace",
+    "actualite": "press", "news": "press", "media": "press",
+}
 _TRACKING_QUERY_KEYS = {"fbclid", "gclid", "mc_cid", "mc_eid"}
 _COMMON_NAME_TOKENS = {
     "sas", "sarl", "sa", "eurl", "societe", "groupe", "france", "entreprise",
@@ -93,16 +99,14 @@ def discovery_queries(target: ContactTarget) -> tuple[str, str]:
     display_name = (target.display_name_snapshot or official_name).strip()
     location = (
         target.local_commune_snapshot
-        or target.identity_location_snapshot
+        or ("France" if target.scope == ContactScope.COMPANY and target.is_multi_local else target.identity_location_snapshot)
         or target.local_location_label_snapshot
-        or ""
+        or "France"
     ).strip()
-    if target.siren:
-        first = f'"{official_name}" "{target.siren}"'
-        second = " ".join(part for part in (f'"{display_name}"', f'"{location}"' if location else "", '"site officiel"') if part)
-    else:
-        first = " ".join(part for part in (f'"{display_name}"', f'"{location}"' if location else "", '"site officiel"') if part)
-        second = f'"{display_name}" contact'
+    # A SIREN is a strong verification fact, not a discovery keyword: it pulls
+    # company-data directories ahead of the organisation's own domain.
+    first = " ".join(part for part in (f'"{display_name}"', f'"{location}"', '"site officiel"') if part)
+    second = f'"{display_name}" contact'
     return first, second
 
 
@@ -136,6 +140,9 @@ def classify_domain(domain: str) -> tuple[str, tuple[str, ...]]:
     domain = domain.casefold()
     for blocked, category in _EXCLUDED_DOMAINS.items():
         if domain == blocked or domain.endswith(f".{blocked}"):
+            return WebsiteCandidateClassification.EXCLUDED, (category,)
+    for marker, category in _THIRD_PARTY_DOMAIN_MARKERS.items():
+        if marker in domain:
             return WebsiteCandidateClassification.EXCLUDED, (category,)
     if any(token in domain for token in ("tracking", "redirect", "clickserve")):
         return WebsiteCandidateClassification.EXCLUDED, ("tracking_domain",)

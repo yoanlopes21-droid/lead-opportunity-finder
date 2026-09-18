@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from dataclasses import replace
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -20,6 +21,7 @@ from app.services.contactability.providers.official_web.discovery import (
     candidate_set_fingerprint,
     classify_domain,
     discover_website_candidates,
+    discovery_queries,
 )
 from app.services.contactability.providers.official_web.fetcher import SecureFetchError, SecureWebFetcher
 from app.services.contactability.providers.official_web.extraction import extract_official_contacts
@@ -271,6 +273,62 @@ def test_exact_siren_is_strong_and_conflict_rejects():
     )})
     bad = verify_website_candidates(item, (candidate,), fetcher=bad_fetcher, verified_at=NOW)[0]
     assert bad.status == WebsiteVerificationStatus.REJECTED
+
+
+def test_directory_profile_with_exact_siren_is_not_an_official_site():
+    item = target()
+    candidate = replace(
+        _candidate(item, "https://rubypayeur.com/societe/acme-123456789"),
+        classification=WebsiteCandidateClassification.POTENTIAL_OFFICIAL,
+        rejection_reasons=(),
+    )
+    legal = "https://rubypayeur.com/mentions-legales"
+    fetcher = PageFetcher({
+        candidate.canonical_url: page(candidate.canonical_url,
+            "Fiche entreprise ACME INDUSTRIE SAS SIREN 123456789 données légales", (legal,)),
+        legal: page(legal, "Mentions légales. Éditeur : RubyPayeur."),
+    })
+    result = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)[0]
+    assert result.status == WebsiteVerificationStatus.REJECTED
+    assert "third_party_directory" in result.rejection_reasons
+    assert any(signal.signal_type == "siren_exact" for signal in result.signals)
+
+
+def test_legal_operator_third_party_rejects_even_when_profile_has_target_identity():
+    item = target()
+    candidate = _candidate(item, "https://data.example/entreprise/acme")
+    legal = "https://data.example/mentions-legales"
+    fetcher = PageFetcher({
+        candidate.canonical_url: page(candidate.canonical_url, "ACME INDUSTRIE SAS SIREN 123456789", (legal,)),
+        legal: page(legal, "Éditeur : Data Holdings, annuaire des entreprises."),
+    })
+    result = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)[0]
+    assert result.status == WebsiteVerificationStatus.REJECTED
+    assert "third_party_directory" in result.rejection_reasons
+
+
+def test_brand_domain_and_coherent_legal_operator_can_be_high_confidence():
+    item = target(siren=None, organization_name_snapshot="BABILOU FRANCE", display_name_snapshot="Babilou")
+    candidate = _candidate(item, "https://babilou.fr")
+    legal = "https://babilou.fr/mentions-legales"
+    fetcher = PageFetcher({
+        candidate.canonical_url: page(candidate.canonical_url, "Babilou, solutions petite enfance", (legal,)),
+        legal: page(legal, "Mentions légales. Éditeur : Babilou France."),
+    })
+    result = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)[0]
+    assert result.status == WebsiteVerificationStatus.HIGH_CONFIDENCE
+    assert any(signal.signal_type == "domain_brand_match" for signal in result.signals)
+    assert any(signal.signal_type == "legal_operator_target" for signal in result.signals)
+
+
+def test_discovery_uses_brand_and_context_not_siren_as_primary_query():
+    item = target(siren="123456789", is_multi_local=True)
+    first, fallback = discovery_queries(item)
+    assert "123456789" not in first and "site officiel" in first and "France" in first
+    assert fallback.endswith("contact")
+    assert classify_domain("rubypayeur.com") == (
+        WebsiteCandidateClassification.EXCLUDED, ("financial_directory",)
+    )
 
 
 def test_initial_dns_failure_is_a_retryable_resource_error_not_a_rejected_website(session):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timedelta
-from typing import Sequence
+from typing import Optional, Sequence
 
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -13,10 +13,13 @@ from sqlalchemy.orm import Session
 from app.models import (
     ContactEvidence,
     ContactPoint,
+    ContactProviderState,
+    PersonContact,
     VerifiedWebsiteRecord,
     WebsiteCandidateRecord,
     WebsiteVerificationSignalRecord,
 )
+from app.services.contactability.providers.official_web.discovery import registrable_domain
 from app.services.contactability.contracts import ContactTarget, ContactType
 from app.services.contactability.providers.official_web.contracts import (
     VerifiedOfficialSite,
@@ -31,6 +34,59 @@ def ensure_official_web_schema(engine: Engine) -> None:
     WebsiteCandidateRecord.__table__.create(bind=engine, checkfirst=True)
     VerifiedWebsiteRecord.__table__.create(bind=engine, checkfirst=True)
     WebsiteVerificationSignalRecord.__table__.create(bind=engine, checkfirst=True)
+
+
+def invalidate_official_web_domain(
+    session: Session, *, target_fingerprint: str, company_key: str, target_scope: str,
+    local_key: Optional[str], domain: str,
+) -> dict[str, int]:
+    """Remove facts sourced solely from a wrongly accepted third-party domain.
+
+    Discovery candidates remain as audit/reverification input.  Verification and
+    extraction state is removed so the corrected policy can assess the existing
+    candidate set again without launching a new search.
+    """
+    verified = tuple(session.scalars(select(VerifiedWebsiteRecord).where(
+        VerifiedWebsiteRecord.target_fingerprint == target_fingerprint,
+        VerifiedWebsiteRecord.registrable_domain == domain,
+    )))
+    verified_ids = {item.id for item in verified}
+    signals = tuple(session.scalars(select(WebsiteVerificationSignalRecord).where(
+        WebsiteVerificationSignalRecord.verified_website_id.in_(verified_ids)
+    ))) if verified_ids else ()
+    evidence = tuple(item for item in session.scalars(select(ContactEvidence).where(
+        ContactEvidence.provider == "official_web",
+    )) if registrable_domain(item.source_url or "") == domain)
+    point_ids = {item.contact_point_id for item in evidence if item.contact_point_id is not None}
+    person_ids = {item.person_contact_id for item in evidence if item.person_contact_id is not None}
+    for item in signals + verified + evidence:
+        session.delete(item)
+    session.flush()
+    deleted_points = 0
+    for point_id in point_ids:
+        point = session.get(ContactPoint, point_id)
+        if point and session.scalar(select(ContactEvidence.id).where(ContactEvidence.contact_point_id == point_id)) is None:
+            session.delete(point)
+            deleted_points += 1
+    deleted_people = 0
+    for person_id in person_ids:
+        person = session.get(PersonContact, person_id)
+        if person and session.scalar(select(ContactEvidence.id).where(ContactEvidence.person_contact_id == person_id)) is None:
+            session.delete(person)
+            deleted_people += 1
+    states = tuple(session.scalars(select(ContactProviderState).where(
+        ContactProviderState.company_key == company_key,
+        ContactProviderState.target_scope == target_scope,
+        ContactProviderState.local_key == local_key,
+        ContactProviderState.resource.in_(("verification", "extraction")),
+    )))
+    for state in states:
+        session.delete(state)
+    session.flush()
+    return {
+        "verified": len(verified), "signals": len(signals), "evidence": len(evidence),
+        "contact_points": deleted_points, "person_contacts": deleted_people, "states": len(states),
+    }
 
 
 class OfficialWebRepository:

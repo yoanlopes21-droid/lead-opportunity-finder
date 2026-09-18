@@ -41,6 +41,7 @@ def build_contact_targets(
             ),
             display_name_snapshot=lead.company_name,
             identity_location_snapshot=lead.principal_location,
+            is_multi_local=len(lead.local_opportunities) > 1,
         ),)
 
     company_warnings: tuple[str, ...] = ()
@@ -65,6 +66,7 @@ def build_contact_targets(
         warnings=company_warnings,
         display_name_snapshot=lead.company_name,
         identity_location_snapshot=lead.principal_location,
+        is_multi_local=len(lead.local_opportunities) > 1,
     )]
 
     if relationship != EmployerRelationshipStatus.DIRECT_EMPLOYER:
@@ -92,6 +94,7 @@ def build_contact_targets(
             warnings=tuple(warnings),
             display_name_snapshot=lead.company_name,
             identity_location_snapshot=local.location_label,
+            is_multi_local=False,
         ))
     return tuple(targets)
 

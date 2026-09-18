@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from datetime import datetime
-from typing import Sequence
+from typing import Optional, Sequence
 from urllib.parse import urlsplit
 
 from app.services.contactability.contracts import ContactScope, ContactTarget
@@ -30,6 +30,15 @@ _LEGAL_LINK_MARKERS = ("mentions-legales", "mentions_legales", "legal", "impress
 _CONTACT_LINK_MARKERS = ("contact", "nous-contacter", "nous_contacter")
 _LEGAL_SUFFIXES = {"sas", "sarl", "sa", "eurl", "sasu", "scop", "societe", "groupe", "france"}
 _SIREN_CONTEXT = re.compile(r"(?i)\b(?:siren|siret|rcs)\b.{0,50}?((?:\d[ .-]?){9,14})")
+_THIRD_PARTY_PROFILE_MARKERS = (
+    "fiche entreprise", "annuaire", "donnees legales", "données légales",
+    "informations legales", "informations légales", "entreprises similaires",
+    "rechercher une entreprise", "score de solvabilite", "score de solvabilité",
+)
+_PROFILE_PATH_MARKERS = ("/societe/", "/entreprise/", "/company/", "/fiche/")
+_OPERATOR_PATTERN = re.compile(
+    r"(?is)(?:editeur|éditeur|exploite par|exploité par|propulse par|propulsé par)\s*[:\-]?\s*([^.;]{2,120})"
+)
 TRANSIENT_FETCH_ERROR_KINDS = frozenset({
     "dns_error", "timeout", "network", "connection_reset", "rate_limited", "server_error",
 })
@@ -121,6 +130,9 @@ def _verify_one(
 
     signals = _build_signals(target, candidate, pages, verified_at)
     rejection_reasons = []
+    third_party_reason = _third_party_reason(target, candidate, pages)
+    if third_party_reason:
+        rejection_reasons.append(third_party_reason)
     if any(signal.signal_type == "siren_conflict" for signal in signals):
         rejection_reasons.append("siren_conflict")
     if any(signal.signal_type == "identity_conflict" for signal in signals):
@@ -131,8 +143,11 @@ def _verify_one(
     else:
         families = _positive_families(signals)
         exact_siren = any(signal.signal_type == "siren_exact" for signal in signals)
-        sufficient_families = "identity" in families and bool(families & {"legal", "geography"})
-        if score >= 80 and (exact_siren or sufficient_families):
+        # Identity facts prove that a page is about an organisation.  They do
+        # not prove that the organisation operates the domain.  High confidence
+        # therefore requires independent ownership/officiality evidence.
+        sufficient_identity = exact_siren or "identity" in families
+        if score >= 80 and "ownership" in families and sufficient_identity:
             status = WebsiteVerificationStatus.HIGH_CONFIDENCE
         elif score >= 50:
             status = WebsiteVerificationStatus.REVIEW_NEEDED
@@ -164,6 +179,12 @@ def _build_signals(target, candidate, pages, observed_at):
             ))
     official = normalize_generic(target.organization_name_snapshot) or ""
     display = normalize_generic(target.display_name_snapshot) or official
+    if _domain_brand_matches(target, candidate.registrable_domain):
+        signals.append(_signal(
+            "domain_brand_match", 35, "Domaine lexicalement cohérent avec la marque ou raison sociale.",
+            pages[0].final_url, candidate.registrable_domain,
+            target.display_name_snapshot or target.organization_name_snapshot, observed_at,
+        ))
     if official and official in normalized_text:
         signals.append(_signal(
             "legal_name_exact", 30, "Raison sociale exacte visible.", pages[0].final_url,
@@ -176,6 +197,13 @@ def _build_signals(target, candidate, pages, observed_at):
         signals.append(_signal(
             "distinctive_name", 20, "Nom ou marque distinctive cohérente.", pages[0].final_url,
             target.display_name_snapshot or target.organization_name_snapshot,
+            target.display_name_snapshot or target.organization_name_snapshot, observed_at,
+        ))
+    homepage_text = normalize_generic(pages[0].text) or ""
+    if _target_identity_matches(target, homepage_text):
+        signals.append(_signal(
+            "homepage_brand_identity", 20, "Identité de la cible visible sur la page d'accueil du domaine.",
+            pages[0].final_url, target.display_name_snapshot or target.organization_name_snapshot,
             target.display_name_snapshot or target.organization_name_snapshot, observed_at,
         ))
 
@@ -194,6 +222,14 @@ def _build_signals(target, candidate, pages, observed_at):
             "internal_legal_page", 15, "Mentions légales internes accessibles sur le même domaine.",
             legal_pages[0].final_url, "mentions légales", "mentions légales", observed_at,
         ))
+        legal_text = normalize_generic(" ".join(page.text for page in legal_pages)) or ""
+        if _target_identity_matches(target, legal_text):
+            signals.append(_signal(
+                "legal_operator_target", 35,
+                "Les mentions légales internes identifient la cible ou sa marque comme opérateur du site.",
+                legal_pages[0].final_url, target.organization_name_snapshot,
+                target.organization_name_snapshot, observed_at,
+            ))
     return tuple(signals)
 
 
@@ -216,6 +252,52 @@ def _distinctive_name_match(name: str, text: str) -> bool:
     return bool(tokens) and (sum(token in text for token in tokens) >= min(2, len(tokens)))
 
 
+def _domain_brand_matches(target: ContactTarget, domain: str) -> bool:
+    compact_domain = re.sub(r"[^a-z0-9]", "", domain.casefold().split(".", 1)[0])
+    for value in (target.display_name_snapshot, target.organization_name_snapshot):
+        normalized = normalize_generic(value) or ""
+        compact = "".join(
+            token for token in re.findall(r"[a-z0-9]+", normalized)
+            if token not in _LEGAL_SUFFIXES
+        )
+        if len(compact) >= 4 and (compact == compact_domain or compact in compact_domain):
+            return True
+        if any(
+            len(token) >= 4 and token in compact_domain
+            for token in re.findall(r"[a-z0-9]+", normalized)
+            if token not in _LEGAL_SUFFIXES
+        ):
+            return True
+    return False
+
+
+def _target_identity_matches(target: ContactTarget, normalized_text: str) -> bool:
+    names = (target.organization_name_snapshot, target.display_name_snapshot)
+    for name in names:
+        normalized = normalize_generic(name) or ""
+        if normalized and normalized in normalized_text:
+            return True
+        if _distinctive_name_match(normalized, normalized_text):
+            return True
+    return False
+
+
+def _third_party_reason(target, candidate, pages) -> Optional[str]:
+    homepage = pages[0]
+    combined = normalize_generic(" ".join(page.text for page in pages)) or ""
+    path_is_profile = any(marker in urlsplit(homepage.final_url).path.casefold() for marker in _PROFILE_PATH_MARKERS)
+    looks_like_directory = any(marker in combined for marker in _THIRD_PARTY_PROFILE_MARKERS)
+    legal_pages = [page for page in pages[1:] if _is_legal_url(page.final_url)]
+    legal_text = normalize_generic(" ".join(page.text for page in legal_pages)) or ""
+    operator = _OPERATOR_PATTERN.search(legal_text)
+    operator_is_target = bool(operator and _target_identity_matches(target, normalize_generic(operator.group(1)) or ""))
+    if operator and not operator_is_target:
+        return "third_party_directory" if looks_like_directory or path_is_profile else "third_party_profile"
+    if (looks_like_directory or path_is_profile) and not _domain_brand_matches(target, candidate.registrable_domain):
+        return "third_party_directory" if looks_like_directory else "third_party_profile"
+    return ""
+
+
 def _verification_links(links: Sequence[str], domain: str) -> tuple[str, ...]:
     legal = []
     contact = []
@@ -235,8 +317,10 @@ def _positive_families(signals):
     for signal in signals:
         if signal.weight <= 0:
             continue
-        if signal.signal_type in {"legal_name_exact", "distinctive_name"}:
+        if signal.signal_type in {"legal_name_exact", "distinctive_name", "homepage_brand_identity"}:
             families.add("identity")
+        elif signal.signal_type in {"domain_brand_match", "legal_operator_target"}:
+            families.add("ownership")
         elif signal.signal_type == "internal_legal_page":
             families.add("legal")
         elif signal.signal_type in {"geography_match", "local_location_exact"}:

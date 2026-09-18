@@ -104,6 +104,7 @@ class ContactTarget:
     warnings: tuple[str, ...] = ()
     display_name_snapshot: Optional[str] = None
     identity_location_snapshot: Optional[str] = None
+    is_multi_local: bool = False
 
 
 @dataclass(frozen=True)

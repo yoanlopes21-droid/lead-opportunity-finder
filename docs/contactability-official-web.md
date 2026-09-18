@@ -1,5 +1,20 @@
 # Official web contactability provider
 
+## Officiality is separate from company identity
+
+An exact SIREN, legal name, address, or officer list proves only that a page
+describes a company. It does not prove that the company operates the domain.
+`high_confidence` therefore requires an independent ownership signal, such as a
+brand-coherent domain or legal notice identifying the target/brand as operator,
+in addition to identity evidence. A third-party profile or directory is
+rejected when its structure, site-wide legal data, or legal operator identifies
+another service, even if its company facts are exact.
+
+Brave discovery uses the company/brand, a geographic or France context, and
+`site officiel` first. The SIREN remains a verification signal; it is not put
+in the primary discovery query because it disproportionately returns company
+data directories. The bounded fallback remains a single `contact` query.
+
 `official_web` is the primary website-discovery path. It is independent from the
 optional Societe.com provider and never starts a Societe.com request or batch.
 An already persisted Societe.com website may be used as a structured candidate
