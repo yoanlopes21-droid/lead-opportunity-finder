@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import threading
 
 import httpx
 import pytest
@@ -64,15 +65,37 @@ def test_first_and_fallback_requests_are_reserved_and_counted(session):
     assert [(item.run_id, item.request_index, item.outcome) for item in events] == [(10, 1, "completed"), (10, 2, "completed")]
 
 
-def test_network_error_after_dispatch_is_counted_but_budget_block_is_not(session):
+def test_connection_failure_before_dispatch_is_kept_but_not_counted(session):
     usage = service(session, monthly_request_budget=1)
     failing = client(usage, requester=lambda *args, **kwargs: (_ for _ in ()).throw(httpx.ConnectError("nope")))
+    failing.set_run_id(9)
     with pytest.raises(BraveSearchError):
         failing.search("acme", company_key="acme", request_index=1)
-    assert session.query(BraveUsageEvent).one().outcome == "network_error"
-    with pytest.raises(BraveBudgetExceeded, match="monthly_budget_exhausted"):
-        failing.search("other", company_key="other", request_index=1)
-    assert session.query(BraveUsageEvent).count() == 1
+    event = session.query(BraveUsageEvent).one()
+    assert (event.outcome, event.counted_for_budget) == ("connection_failed_pre_dispatch", False)
+    # The run/monthly slot is released after the confirmed pre-dispatch error.
+    assert service(session, monthly_request_budget=1).snapshot().monthly_remaining == 1
+    succeeding = client(service(session, monthly_request_budget=1))
+    succeeding.set_run_id(9)
+    succeeding.search("acme retry", company_key="acme", request_index=1)
+    assert service(session, monthly_request_budget=1).snapshot().monthly_used == 1
+
+
+def test_read_timeout_is_counted_conservatively_after_possible_dispatch(session):
+    failing = client(service(session), requester=lambda *args, **kwargs: (_ for _ in ()).throw(httpx.ReadTimeout("nope")))
+    with pytest.raises(BraveSearchError, match="timed out"):
+        failing.search("acme", company_key="acme", request_index=1)
+    event = session.query(BraveUsageEvent).one()
+    assert (event.outcome, event.counted_for_budget) == ("transport_outcome_unknown", True)
+
+
+@pytest.mark.parametrize("status", [429, 500])
+def test_provider_http_response_is_counted(session, status):
+    response = Response()
+    response.status_code = status
+    with pytest.raises(BraveSearchError):
+        client(service(session), requester=lambda *args, **kwargs: response).search("acme")
+    assert session.query(BraveUsageEvent).one().counted_for_budget is True
 
 
 def test_run_and_monthly_caps_are_shared_without_double_counting(session):
@@ -90,6 +113,36 @@ def test_run_and_monthly_caps_are_shared_without_double_counting(session):
     assert session.query(BraveUsageEvent).count() == 3
 
 
+def test_sqlite_concurrent_reservations_cannot_exceed_a_hard_cap(tmp_path):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'concurrent-brave-usage.sqlite3'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    barrier = threading.Barrier(2)
+    outcomes = []
+
+    def reserve(index):
+        with Session(engine) as local_session:
+            local_usage = service(local_session, monthly_request_budget=1, default_run_hard_cap=1)
+            barrier.wait()
+            try:
+                local_usage.reserve_request(
+                    run_id=10, company_key=f"acme-{index}", query=f"query-{index}", request_index=1,
+                )
+                outcomes.append("reserved")
+            except BraveBudgetExceeded as exc:
+                outcomes.append(exc.kind)
+
+    threads = [threading.Thread(target=reserve, args=(index,)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert sorted(outcomes) == ["monthly_budget_exhausted", "reserved"]
+    engine.dispose()
+
+
 def test_history_is_idempotent_and_months_keep_project_total(session):
     usage = service(session)
     assert usage.seed_initial_history() is True
@@ -98,6 +151,24 @@ def test_history_is_idempotent_and_months_keep_project_total(session):
     october = usage.snapshot(at=datetime(2026, 10, 1, tzinfo=timezone.utc))
     assert (september.monthly_used, september.monthly_remaining, september.estimated_cost_used_usd) == (14, 986, Decimal("0.07"))
     assert october.monthly_used == 0 and october.project_total_requests == 14
+
+
+def test_reconciliation_keeps_run_attempts_but_restores_estimated_budget(session):
+    usage = service(session)
+    usage.seed_initial_history()
+    events = []
+    for index in range(6):
+        event = usage.reserve_request(
+            run_id=4, company_key="acme", query=f"query-{index}", request_index=1,
+            run_hard_cap=8,
+        )
+        usage.record_outcome(event.id, "network_error")
+        events.append(event.id)
+    assert usage.snapshot().monthly_used == 20
+    assert usage.reconcile_pre_dispatch_failures(tuple(events), note="Confirmed pre-provider transport failure") == 6
+    snapshot = usage.snapshot()
+    assert (snapshot.monthly_used, snapshot.monthly_remaining, snapshot.estimated_cost_used_usd) == (14, 986, Decimal("0.07"))
+    assert (snapshot.project_total_attempts, snapshot.project_total_counted_requests) == (20, 14)
 
 
 def test_snapshot_pacing_is_deterministic(session):

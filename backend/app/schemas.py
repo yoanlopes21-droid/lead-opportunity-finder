@@ -26,6 +26,8 @@ class BraveUsageResponse(BaseModel):
     estimated_cost_used_usd: Decimal
     estimated_credit_remaining_usd: Decimal
     project_total_requests: int
+    project_total_attempts: int
+    project_total_counted_requests: int
     current_period_start: datetime
     current_period_end: datetime
     days_remaining_in_period: int

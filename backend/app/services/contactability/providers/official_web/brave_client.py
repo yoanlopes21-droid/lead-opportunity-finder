@@ -69,12 +69,18 @@ class BraveSearchClient:
                 params={"q": query, "count": min(max(count, 1), 5)},
                 timeout=self._timeout,
             )
-        except httpx.TimeoutException as exc:
-            self._record(reservation, "timeout")
-            raise BraveSearchError("timeout", "Brave Search request timed out") from exc
-        except httpx.HTTPError as exc:
-            self._record(reservation, "network_error")
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ProxyError, httpx.PoolTimeout) as exc:
+            # No HTTP response exists and these transport stages occur before
+            # an HTTP request can reach the provider. Keep the attempt for
+            # auditability but free its budget slot.
+            self._record(reservation, "connection_failed_pre_dispatch", counted_for_budget=False)
             raise BraveSearchError("network", "Brave Search request failed") from exc
+        except (httpx.ReadTimeout, httpx.WriteTimeout, httpx.ReadError, httpx.WriteError,
+                httpx.CloseError, httpx.TimeoutException, httpx.NetworkError) as exc:
+            # A request may already have reached Brave; count unknown/post-send
+            # failures conservatively. Read timeouts are explicitly in scope.
+            self._record(reservation, "transport_outcome_unknown")
+            raise BraveSearchError("timeout", "Brave Search request timed out") from exc
         finally:
             self._last_request_at = self._monotonic()
         status = int(getattr(response, "status_code", 0))
@@ -95,9 +101,11 @@ class BraveSearchClient:
         self._record(reservation, "completed")
         return _parse_results(payload, limit=min(max(count, 1), 5))
 
-    def _record(self, reservation, outcome: str) -> None:
+    def _record(self, reservation, outcome: str, *, counted_for_budget: Optional[bool] = None) -> None:
         if reservation is not None:
-            self._usage_service.record_outcome(reservation.id, outcome)
+            self._usage_service.record_outcome(
+                reservation.id, outcome, counted_for_budget=counted_for_budget,
+            )
 
     def _rate_limit(self) -> None:
         if self._last_request_at is None:

@@ -31,6 +31,12 @@ only when that opt-in provider was previously run by an explicit user action.
    contact-page URL and clearly attributed professional people.
 
 No Brave response, fetched HTML, binary, or page archive is persisted. The
+local Brave ledger records each attempted search separately from estimated
+provider consumption. Connection, DNS, proxy, pool and connect-timeout failures
+that occur before an HTTP request can reach Brave remain visible as attempts but
+do not consume the local budget. Once dispatch may have happened (including a
+read timeout or a broken connection after writing), the estimate remains counted
+conservatively. HTTP responses, including 429 and 5xx, are counted.
 database contains only canonical candidate URLs, short search metadata,
 verification outcomes, and minimal explainable signals.
 
