@@ -11,8 +11,9 @@ only when that opt-in provider was previously run by an explicit user action.
    website candidates, URLs sourced from offers, then optional Brave Search.
 2. **Verification** fetches at most the candidate page plus a small number of
    same-domain legal/contact pages and records weighted identity signals.
-3. **Extraction** of final emails, phones and people is deliberately outside
-   this foundation.
+3. **Extraction** is a bounded third resource on an already `high_confidence`
+   or `review_needed` domain. It may retain public email, phone, official site,
+   contact-page URL and clearly attributed professional people.
 
 No Brave response, fetched HTML, binary, or page archive is persisted. The
 database contains only canonical candidate URLs, short search metadata,
@@ -72,3 +73,26 @@ Discovery and verification have independent provider states. Verification's
 input fingerprint includes the ordered candidate set, so a changed candidate
 set invalidates verification without making the generic batch understand web
 artifact internals.
+
+## Robots and contact extraction
+
+Additional extraction pages are selected only from the verified domain: at most
+six useful pages (home, contact, legal, team, careers, or an explicit local
+page). `robots.txt` is fetched through the same protected GET-only fetcher and
+parsed per origin. It is injectable for tests; if it cannot be obtained or
+parsed for a follow-up URL, exploration fails closed. No POST, forms, login,
+browser automation, PDF, binary, or broad crawl is used.
+
+All extracted facts have `official_web` evidence with an exact page URL,
+observation time, reason, and a short text excerpt; fetched HTML is never
+stored. Website evidence is `source_verified` with at most `high_confidence`,
+never automatically `confirmed`. People are created only where an official,
+non-editorial page explicitly pairs a name with a relevant role: HR, recruitment,
+director, or manager. Local facts additionally require the page to explicitly
+match the local commune or location; they are never propagated to other local
+opportunities. Intermediary facts remain scoped to the intermediary.
+
+Extraction is cached separately: contacts for 30 days, people for 45 days, and
+a no-result outcome for 14 days. Its fingerprint includes verified-domain
+records and extraction-policy version, so a verified-domain change invalidates
+it independently.

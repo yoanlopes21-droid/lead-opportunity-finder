@@ -122,6 +122,10 @@ class SecureWebFetcher:
             return page
         raise SecureFetchError("too_many_redirects", "Website exceeded redirect limit")
 
+    def set_robots_checker(self, checker: Callable[[str, str], bool]) -> None:
+        """Install the policy used for bounded, non-initial exploration."""
+        self._robots_checker = checker
+
     def _rate_limit(self, hostname: str) -> None:
         last = self._last_request_by_host.get(hostname)
         if last is None:
@@ -224,7 +228,8 @@ class _PageParser(HTMLParser):
 
 def _parse_page(content: str, base_url: str, content_type: str) -> tuple[str, tuple[str, ...]]:
     if content_type == "text/plain":
-        return " ".join(content.split()), ()
+        # robots.txt needs its line structure while remaining only in process memory.
+        return content, ()
     parser = _PageParser(base_url)
     parser.feed(content)
     return " ".join(" ".join(parser.text_parts).split()), tuple(dict.fromkeys(parser.links))

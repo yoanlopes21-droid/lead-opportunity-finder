@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.models import ContactProviderState, VerifiedWebsiteRecord, WebsiteCandidateRecord
+from app.models import ContactEvidence, ContactPoint, ContactProviderState, VerifiedWebsiteRecord, WebsiteCandidateRecord
 from app.services.contactability.batch import ContactBatchPolicy, ContactEnrichmentBatchOrchestrator
 from app.services.contactability.contracts import ContactProviderStatus, ContactScope, ContactTarget
 from app.services.contactability.providers.official_web.brave_client import BraveSearchClient
@@ -22,12 +22,14 @@ from app.services.contactability.providers.official_web.discovery import (
     discover_website_candidates,
 )
 from app.services.contactability.providers.official_web.fetcher import SecureFetchError, SecureWebFetcher
+from app.services.contactability.providers.official_web.extraction import extract_official_contacts
 from app.services.contactability.providers.official_web.persistence import OfficialWebRepository
 from app.services.contactability.providers.official_web.provider import (
     OfficialWebProvider,
     official_web_target_fingerprint,
 )
 from app.services.contactability.providers.official_web.verification import verify_website_candidates
+from app.services.contactability.providers.official_web.robots import RobotsTxtPolicy
 
 
 NOW = datetime(2026, 9, 18, 10, tzinfo=timezone.utc)
@@ -229,6 +231,23 @@ def test_fetcher_requires_robots_for_additional_pages_and_reuses_memory_cache():
     assert exc.value.kind == "robots_disallowed"
 
 
+def test_real_robots_policy_is_cached_and_fails_closed_when_disallowed():
+    calls = []
+    def requester(method, url, **kwargs):
+        calls.append(url)
+        if url.endswith("/robots.txt"):
+            return Response(content=b"User-agent: *\nDisallow: /private\nAllow: /contact\n", content_type="text/plain")
+        return Response(content=b"<p>ok</p>")
+    fetcher = SecureWebFetcher(requester=requester, resolver=PUBLIC_IP, sleeper=lambda _: None)
+    policy = RobotsTxtPolicy(fetcher)
+    fetcher.set_robots_checker(policy.allowed)
+    fetcher.fetch("https://acme.fr/contact", initial=False)
+    with pytest.raises(SecureFetchError) as exc:
+        fetcher.fetch("https://acme.fr/private", initial=False)
+    assert exc.value.kind == "robots_disallowed"
+    assert calls.count("https://acme.fr/robots.txt") == 1
+
+
 def _candidate(item=None, url="https://acme.fr"):
     item = item or target()
     candidates, _, _ = discover_website_candidates(
@@ -323,8 +342,10 @@ def test_batch_persists_artifacts_and_caches_resources_independently(session):
     assert run.status == "completed"
     assert session.scalar(select(WebsiteCandidateRecord)) is not None
     assert session.scalar(select(VerifiedWebsiteRecord)).status == WebsiteVerificationStatus.HIGH_CONFIDENCE
+    assert session.scalar(select(ContactPoint)).contact_type == "website"
+    assert session.scalar(select(ContactEvidence)).provider == "official_web"
     states = session.scalars(select(ContactProviderState).order_by(ContactProviderState.resource)).all()
-    assert [state.resource for state in states] == ["discovery", "verification"]
+    assert [state.resource for state in states] == ["discovery", "extraction", "verification"]
     assert all(state.target_fingerprint for state in states)
 
 
@@ -343,3 +364,33 @@ def test_official_web_has_no_societe_dependency_and_target_fingerprint_is_stable
     provider = OfficialWebProvider(repository=OfficialWebRepository(session), fetcher=PageFetcher({}))
     assert provider.target_fingerprint(target()) == provider.target_fingerprint(target())
     assert "societe" not in type(provider).__module__
+
+
+def test_extraction_keeps_public_contacts_people_and_minimal_evidence(session):
+    item = target()
+    candidate = _candidate(item)
+    contact_url = "https://acme.fr/contact"
+    fetcher = PageFetcher({
+        "https://acme.fr/": page("https://acme.fr/", "ACME INDUSTRIE SAS SIREN 123456789", (contact_url,)),
+        contact_url: page(contact_url, "ACME INDUSTRIE SAS Contact contact@acme.fr 01 23 45 67 89 Alice Martin - Directrice des ressources humaines"),
+    })
+    verified = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)
+    class AllowRobots:
+        def allowed(self, url, user_agent): return True
+    points, people, _, _ = extract_official_contacts(
+        item, verified, fetcher=fetcher, observed_at=NOW, robots_policy=AllowRobots(),
+    )
+    assert {point.contact_type for point in points} >= {"website", "professional_url", "email", "phone"}
+    assert people[0].full_name == "Alice Martin" and people[0].relevance_role == "hr"
+    assert all(point.confidence_level == "high_confidence" for point in points)
+    assert all(point.verification_status == "source_verified" for point in points)
+    assert all(evidence.source_url and len(evidence.excerpt or "") <= 500 for point in points for evidence in point.evidence)
+
+
+def test_local_extraction_never_propagates_without_explicit_location():
+    item = target(scope=ContactScope.LOCAL, local_key="creteil", local_commune_snapshot="Créteil")
+    candidate = _candidate(item)
+    fetcher = PageFetcher({"https://acme.fr/": page("https://acme.fr/", "ACME INDUSTRIE SAS SIREN 123456789 contact@acme.fr")})
+    verified = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)
+    points, people, _, _ = extract_official_contacts(item, verified, fetcher=fetcher, observed_at=NOW)
+    assert points == () and people == ()

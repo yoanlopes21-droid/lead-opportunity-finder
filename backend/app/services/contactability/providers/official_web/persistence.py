@@ -131,6 +131,16 @@ class OfficialWebRepository:
                     self.session.add(evidence)
         self.session.flush()
 
+    def verified_sites_for_extraction(self, target_fingerprint: str) -> tuple[VerifiedOfficialSite, ...]:
+        records = self.session.scalars(select(VerifiedWebsiteRecord).where(
+            VerifiedWebsiteRecord.target_fingerprint == target_fingerprint,
+            VerifiedWebsiteRecord.status.in_((
+                WebsiteVerificationStatus.HIGH_CONFIDENCE,
+                WebsiteVerificationStatus.REVIEW_NEEDED,
+            )),
+        ).order_by(VerifiedWebsiteRecord.score.desc(), VerifiedWebsiteRecord.canonical_url)).all()
+        return tuple(_verified_from_record(item) for item in records)
+
 
 def _copy_candidate(record, item):
     for field in (
@@ -165,6 +175,18 @@ def _candidate_from_record(item):
         observed_at=item.observed_at, classification=item.classification,
         rejection_reasons=tuple(item.rejection_reasons or ()),
         candidate_fingerprint=item.candidate_fingerprint,
+    )
+
+
+def _verified_from_record(item):
+    return VerifiedOfficialSite(
+        company_key=item.company_key, target_scope=item.target_scope, local_key=item.local_key,
+        target_fingerprint=item.target_fingerprint, candidate_fingerprint=item.candidate_fingerprint,
+        candidate_set_fingerprint=item.candidate_set_fingerprint, provider=item.provider,
+        canonical_url=item.canonical_url, registrable_domain=item.registrable_domain,
+        status=item.status, score=item.score, rejection_reasons=tuple(item.rejection_reasons or ()),
+        attribution_warnings=tuple(item.attribution_warnings or ()), observed_at=item.observed_at,
+        verified_at=item.verified_at, signals=(), fingerprint=item.fingerprint,
     )
 
 

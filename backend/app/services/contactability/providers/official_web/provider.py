@@ -26,7 +26,9 @@ from app.services.contactability.providers.official_web.discovery import (
     candidate_set_fingerprint,
     discover_website_candidates,
 )
+from app.services.contactability.providers.official_web.extraction import extract_official_contacts
 from app.services.contactability.providers.official_web.persistence import OfficialWebRepository
+from app.services.contactability.providers.official_web.robots import RobotsTxtPolicy
 from app.services.contactability.providers.official_web.verification import verify_website_candidates
 
 
@@ -37,7 +39,7 @@ class OfficialWebProvider:
     """Uses only injected/cached seeds and optional Brave; never invokes Societe.com."""
 
     name = PROVIDER_NAME
-    resources = ("discovery", "verification")
+    resources = ("discovery", "verification", "extraction")
 
     def __init__(
         self,
@@ -50,6 +52,11 @@ class OfficialWebProvider:
         discovery_ttl: timedelta = timedelta(days=30),
         verification_high_ttl: timedelta = timedelta(days=90),
         verification_review_ttl: timedelta = timedelta(days=30),
+        extraction_contacts_ttl: timedelta = timedelta(days=30),
+        extraction_people_ttl: timedelta = timedelta(days=45),
+        extraction_not_found_ttl: timedelta = timedelta(days=14),
+        extraction_policy_version: int = 1,
+        robots_policy: Optional[object] = None,
     ) -> None:
         self.repository = repository
         self.fetcher = fetcher
@@ -59,6 +66,14 @@ class OfficialWebProvider:
         self.discovery_ttl = discovery_ttl
         self.verification_high_ttl = verification_high_ttl
         self.verification_review_ttl = verification_review_ttl
+        self.extraction_contacts_ttl = extraction_contacts_ttl
+        self.extraction_people_ttl = extraction_people_ttl
+        self.extraction_not_found_ttl = extraction_not_found_ttl
+        self.extraction_policy_version = extraction_policy_version
+        self.robots_policy = robots_policy
+        if self.robots_policy is None and hasattr(fetcher, "set_robots_checker"):
+            self.robots_policy = RobotsTxtPolicy(fetcher)
+            fetcher.set_robots_checker(self.robots_policy.allowed)
 
     @property
     def is_configured(self) -> bool:
@@ -76,6 +91,8 @@ class OfficialWebProvider:
             return self.discovery_ttl
         if resource == "verification":
             return self.verification_review_ttl
+        if resource == "extraction":
+            return self.extraction_not_found_ttl if status == ContactProviderStatus.NOT_FOUND else self.extraction_contacts_ttl
         raise ValueError("unknown official_web resource")
 
     def resource_ttl_for_result(
@@ -87,6 +104,8 @@ class OfficialWebProvider:
             for item in result.artifacts
         ):
             return self.verification_high_ttl
+        if resource == "extraction" and result.person_candidates:
+            return self.extraction_people_ttl
         return self.resource_ttl(resource, result.status)
 
     def resource_input_fingerprint(self, target: ContactTarget, resource: str) -> str:
@@ -106,6 +125,13 @@ class OfficialWebProvider:
                 "resource": resource,
                 "candidate_set": candidate_set_fingerprint(candidates),
                 "policy": 1,
+            })
+        if resource == "extraction":
+            sites = self.repository.verified_sites_for_extraction(self.target_fingerprint(target))
+            return _fingerprint({
+                "target": self.target_fingerprint(target), "resource": resource,
+                "verified_domains": sorted((site.registrable_domain, site.fingerprint, site.status) for site in sites),
+                "policy": self.extraction_policy_version,
             })
         raise ValueError("unknown official_web resource")
 
@@ -148,6 +174,22 @@ class OfficialWebProvider:
                 ContactProviderStatus.COMPLETED, target_fp, attempted_at,
                 request_count=max(calls, 0), artifacts=verified,
             )
+        if resource == "extraction":
+            sites = self.repository.verified_sites_for_extraction(target_fp)
+            if not sites:
+                return _result(ContactProviderStatus.NOT_FOUND, target_fp, attempted_at)
+            points, people, calls, warnings = extract_official_contacts(
+                target, sites, fetcher=self.fetcher, observed_at=attempted_at,
+                robots_policy=self.robots_policy,
+            )
+            return ContactProviderResult(
+                provider=PROVIDER_NAME,
+                status=ContactProviderStatus.COMPLETED if (points or people) else ContactProviderStatus.NOT_FOUND,
+                candidates=points, person_candidates=people, warnings=warnings,
+                metadata=ContactProviderAttemptMetadata(
+                    target_fingerprint=target_fp, attempted_at=attempted_at, request_count=calls,
+                ),
+            )
         raise ValueError("unknown official_web resource")
 
     def persist_resource_result(
@@ -164,6 +206,10 @@ class OfficialWebProvider:
                 verified, high_ttl=self.verification_high_ttl,
                 review_ttl=self.verification_review_ttl,
             )
+            return
+        if resource == "extraction":
+            from app.services.contactability.persistence import persist_contact_provider_result
+            persist_contact_provider_result(session, result)
             return
         raise ValueError("unknown official_web resource")
 
