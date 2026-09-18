@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Protocol, Sequence
+from typing import Any, Optional, Protocol, Sequence
 
 
 class ContactScope:
@@ -102,6 +102,8 @@ class ContactTarget:
     employer_relationship_status: str
     identity_match_status: Optional[str]
     warnings: tuple[str, ...] = ()
+    display_name_snapshot: Optional[str] = None
+    identity_location_snapshot: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -232,6 +234,7 @@ class ContactProviderResult:
     person_candidates: tuple[PersonContactCandidate, ...] = ()
     warnings: tuple[str, ...] = ()
     metadata: Optional[ContactProviderAttemptMetadata] = None
+    artifacts: tuple[Any, ...] = ()
 
 
 class ContactProvider(Protocol):

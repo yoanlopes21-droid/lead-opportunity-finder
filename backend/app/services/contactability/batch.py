@@ -208,7 +208,8 @@ class ContactEnrichmentBatchOrchestrator:
         all_not_found = True
         transient_error = False
         for resource in self._provider.resources:
-            state = self._find_state(session, item.target_fingerprint, resource)
+            input_fingerprint = self._resource_input_fingerprint(target, resource)
+            state = self._find_state(session, input_fingerprint, resource)
             now = self._clock()
             if _is_fresh(state, now):
                 cached_resources += 1
@@ -220,9 +221,9 @@ class ContactEnrichmentBatchOrchestrator:
             run.retry_count += retries
             item.attempt_count += retries
             if result.status == ContactProviderStatus.COMPLETED:
-                persist_contact_provider_result(session, result)
+                self._persist_resource_result(session, target, resource, result)
             state = self._record_resource_state(
-                session, item, resource, result, calls, final_error_type,
+                session, item, resource, input_fingerprint, result, calls, final_error_type,
             )
             if result.status == ContactProviderStatus.ERROR:
                 transient_error = final_error_type in _TRANSIENT_ERROR_TYPES
@@ -288,16 +289,17 @@ class ContactEnrichmentBatchOrchestrator:
         session: Session,
         item: ContactEnrichmentRunItem,
         resource: str,
+        input_fingerprint: str,
         result: ContactProviderResult,
         calls: int,
         error_type: Optional[str],
     ) -> ContactProviderState:
-        state = self._find_state(session, item.target_fingerprint, resource)
+        state = self._find_state(session, input_fingerprint, resource)
         now = self._clock()
         if state is None:
             state = ContactProviderState(
                 provider=self._provider.name,
-                target_fingerprint=item.target_fingerprint,
+                target_fingerprint=input_fingerprint,
                 resource=resource,
                 company_key=item.company_key,
                 target_scope=item.target_scope,
@@ -313,14 +315,41 @@ class ContactEnrichmentBatchOrchestrator:
         state.last_error_message = _safe_error_message(error_type) if result.status == ContactProviderStatus.ERROR else None
         if result.status in _FRESH_RESOURCE_STATUSES:
             state.last_success_at = now
-            state.fresh_until = now + self._provider.resource_ttl(resource, result.status)
-            state.result_count = len(result.candidates) + len(result.person_candidates)
+            state.fresh_until = now + self._resource_ttl(resource, result)
+            state.result_count = (
+                len(result.candidates) + len(result.person_candidates) + len(result.artifacts)
+            )
             state.last_error_type = None
             state.last_error_message = None
         else:
             state.fresh_until = None
         session.flush()
         return state
+
+    def _resource_input_fingerprint(self, target: ContactTarget, resource: str) -> str:
+        hook = getattr(self._provider, "resource_input_fingerprint", None)
+        if hook is None:
+            return self._provider.target_fingerprint(target)
+        return hook(target, resource)
+
+    def _persist_resource_result(
+        self,
+        session: Session,
+        target: ContactTarget,
+        resource: str,
+        result: ContactProviderResult,
+    ) -> None:
+        hook = getattr(self._provider, "persist_resource_result", None)
+        if hook is not None:
+            hook(session, target, resource, result)
+            return
+        persist_contact_provider_result(session, result)
+
+    def _resource_ttl(self, resource: str, result: ContactProviderResult) -> timedelta:
+        hook = getattr(self._provider, "resource_ttl_for_result", None)
+        if hook is not None:
+            return hook(resource, result)
+        return self._provider.resource_ttl(resource, result.status)
 
     def _finish_item(
         self,

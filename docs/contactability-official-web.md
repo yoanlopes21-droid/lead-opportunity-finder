@@ -1,0 +1,74 @@
+# Official web contactability provider
+
+`official_web` is the primary website-discovery path. It is independent from the
+optional Societe.com provider and never starts a Societe.com request or batch.
+An already persisted Societe.com website may be used as a structured candidate
+only when that opt-in provider was previously run by an explicit user action.
+
+## Phases
+
+1. **Discovery** considers a fresh verified-site cache, persisted structured
+   website candidates, URLs sourced from offers, then optional Brave Search.
+2. **Verification** fetches at most the candidate page plus a small number of
+   same-domain legal/contact pages and records weighted identity signals.
+3. **Extraction** of final emails, phones and people is deliberately outside
+   this foundation.
+
+No Brave response, fetched HTML, binary, or page archive is persisted. The
+database contains only canonical candidate URLs, short search metadata,
+verification outcomes, and minimal explainable signals.
+
+## Optional Brave configuration
+
+Set `LEAD_FINDER_BRAVE_SEARCH_API_KEY` only when Brave discovery is explicitly
+enabled. Without it, cached, structured and offer-derived candidates remain
+usable. Missing Brave or Societe.com credentials do not prevent the application
+or local website verification from operating.
+
+Discovery uses no more than two searches and retains at most five results per
+search. A satisfactory first result avoids the fallback query. Local targets do
+not trigger Brave searches by default.
+
+## Verification and confidence
+
+Search rank is never evidence of official status. Excluded jobboards,
+directories, social networks, search/video platforms and obvious tracking
+domains are rejected before verification. The verifier then weighs exact legal
+identifiers, legal/display names, geography and same-domain legal pages.
+
+`high_confidence` requires a score of at least 80, no strong conflict, and either
+an exact SIREN/SIRET signal or independent identity plus legal/geographic signal
+families. Other outcomes are `review_needed`, `ambiguous`, or `rejected`.
+There is no automatic `confirmed` status. A SIREN observed on a website is only
+verification evidence and never mutates DINUM enrichment.
+
+National brand domains (for example retail networks) remain company/brand
+candidates. They do not establish a local legal employer and are never copied
+to every LocalOpportunity. A future official local page may be attached to a
+`local_key` only when its location is explicit.
+
+## HTTP safety policy
+
+The fetcher allows GET requests to public HTTP(S) destinations on standard web
+ports, with a 10-second default timeout, three redirects, a 1 MiB response cap,
+HTML/text content only, and approximately one request per second per domain.
+Every initial destination and redirect is DNS-resolved and rejected when any
+address is non-public, loopback, private or link-local.
+
+The initial search-result/candidate page may be fetched directly because it is
+the user/provider-selected public resource being verified. Every additional
+page requires an affirmative robots-policy check; without an available robots
+decision, additional exploration is refused. The same page is reused from an
+in-memory cache during one verification.
+
+## Cache
+
+- discovery: 30 days;
+- discovery with no result: 30 days;
+- verified `high_confidence`: 90 days;
+- `review_needed`, `ambiguous`, or rejected hypotheses: 30 days.
+
+Discovery and verification have independent provider states. Verification's
+input fingerprint includes the ordered candidate set, so a changed candidate
+set invalidates verification without making the generic batch understand web
+artifact internals.

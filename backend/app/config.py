@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     societe_com_requests_per_second: float = 1.0
     societe_com_contact_ttl_days: int = 30
     societe_com_directors_ttl_days: int = 90
+    brave_search_api_key: Optional[SecretStr] = None
+    brave_search_api_url: str = "https://api.search.brave.com/res/v1/web/search"
+    brave_search_timeout_seconds: float = 10.0
+    brave_search_requests_per_second: float = 1.0
+    official_web_fetch_timeout_seconds: float = 10.0
+    official_web_fetch_requests_per_second: float = 1.0
+    official_web_max_response_bytes: int = 1_048_576
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

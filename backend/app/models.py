@@ -450,3 +450,72 @@ class ContactProviderState(Base):
             name="uq_contact_provider_state_resource",
         ),
     )
+
+
+class WebsiteCandidateRecord(Base):
+    """Minimal domain-discovery artifact; never stores a search payload."""
+
+    __tablename__ = "website_candidates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    target_scope: Mapped[str] = mapped_column(String(30), index=True)
+    local_key: Mapped[Optional[str]] = mapped_column(String(500), index=True)
+    target_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    query_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    search_provider: Mapped[str] = mapped_column(String(120), index=True)
+    query_index: Mapped[int] = mapped_column(Integer)
+    result_rank: Mapped[int] = mapped_column(Integer)
+    url: Mapped[str] = mapped_column(String(2048))
+    canonical_url: Mapped[str] = mapped_column(String(2048), index=True)
+    registrable_domain: Mapped[str] = mapped_column(String(255), index=True)
+    title: Mapped[Optional[str]] = mapped_column(String(500))
+    snippet: Mapped[Optional[str]] = mapped_column(String(1000))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    classification: Mapped[str] = mapped_column(String(50), index=True)
+    rejection_reasons: Mapped[list] = mapped_column(JSON, default=list)
+    candidate_fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class VerifiedWebsiteRecord(Base):
+    """A scored official-site hypothesis, not an automatically confirmed fact."""
+
+    __tablename__ = "verified_websites"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    target_scope: Mapped[str] = mapped_column(String(30), index=True)
+    local_key: Mapped[Optional[str]] = mapped_column(String(500), index=True)
+    target_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    candidate_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    candidate_set_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(120), index=True)
+    canonical_url: Mapped[str] = mapped_column(String(2048))
+    registrable_domain: Mapped[str] = mapped_column(String(255), index=True)
+    status: Mapped[str] = mapped_column(String(40), index=True)
+    score: Mapped[int] = mapped_column(Integer)
+    rejection_reasons: Mapped[list] = mapped_column(JSON, default=list)
+    attribution_warnings: Mapped[list] = mapped_column(JSON, default=list)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    fresh_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+
+
+class WebsiteVerificationSignalRecord(Base):
+    """Minimal explainable evidence attached to a website hypothesis."""
+
+    __tablename__ = "website_verification_signals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    verified_website_id: Mapped[int] = mapped_column(
+        ForeignKey("verified_websites.id"), index=True
+    )
+    signal_type: Mapped[str] = mapped_column(String(80), index=True)
+    polarity: Mapped[str] = mapped_column(String(20), index=True)
+    weight: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(500))
+    source_url: Mapped[str] = mapped_column(String(2048))
+    excerpt: Mapped[Optional[str]] = mapped_column(String(500))
+    observed_value: Mapped[Optional[str]] = mapped_column(String(500))
+    expected_value: Mapped[Optional[str]] = mapped_column(String(500))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)

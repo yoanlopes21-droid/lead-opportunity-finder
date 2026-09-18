@@ -39,6 +39,8 @@ def build_contact_targets(
             warnings=(
                 "Les coordonnées découvertes seront attribuées à l'intermédiaire, pas à un employeur final.",
             ),
+            display_name_snapshot=lead.company_name,
+            identity_location_snapshot=lead.principal_location,
         ),)
 
     company_warnings: tuple[str, ...] = ()
@@ -61,6 +63,8 @@ def build_contact_targets(
         employer_relationship_status=relationship,
         identity_match_status=identity_status,
         warnings=company_warnings,
+        display_name_snapshot=lead.company_name,
+        identity_location_snapshot=lead.principal_location,
     )]
 
     if relationship != EmployerRelationshipStatus.DIRECT_EMPLOYER:
@@ -86,6 +90,8 @@ def build_contact_targets(
             employer_relationship_status=relationship,
             identity_match_status=identity_status,
             warnings=tuple(warnings),
+            display_name_snapshot=lead.company_name,
+            identity_location_snapshot=local.location_label,
         ))
     return tuple(targets)
 
