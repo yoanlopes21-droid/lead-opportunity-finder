@@ -46,7 +46,9 @@ _FRESH_RESOURCE_STATUSES = {
     ContactProviderStatus.COMPLETED,
     ContactProviderStatus.NOT_FOUND,
 }
-_TRANSIENT_ERROR_TYPES = {"timeout", "rate_limited", "server_error", "network"}
+_TRANSIENT_ERROR_TYPES = {
+    "dns_error", "timeout", "rate_limited", "server_error", "network", "connection_reset",
+}
 
 
 class ContactResourceProvider(Protocol):
@@ -150,10 +152,13 @@ class ContactEnrichmentBatchOrchestrator:
             raise ValueError("contact enrichment run does not exist")
         if run.provider != self._provider.name:
             raise ValueError("contact enrichment run provider does not match")
-        if run.status in {ContactEnrichmentRunStatus.COMPLETED, ContactEnrichmentRunStatus.COMPLETED_WITH_ERRORS}:
+        if run.status == ContactEnrichmentRunStatus.COMPLETED:
             return run
         items = self._items(session, run.id)
         self._validate_selection(run, items)
+        retried_errors = self._reset_transient_error_items(run, items)
+        if run.status == ContactEnrichmentRunStatus.COMPLETED_WITH_ERRORS and not retried_errors:
+            return run
         for item in items:
             if item.status == ContactEnrichmentRunItemStatus.PROCESSING:
                 item.status = ContactEnrichmentRunItemStatus.PENDING
@@ -184,6 +189,26 @@ class ContactEnrichmentBatchOrchestrator:
             if run.status == ContactEnrichmentRunStatus.RUNNING:
                 self._finish_run(session, run, ContactEnrichmentRunStatus.FAILED)
             raise
+
+    def _reset_transient_error_items(
+        self, run: ContactEnrichmentRun, items: tuple[ContactEnrichmentRunItem, ...],
+    ) -> bool:
+        """Allow an explicit resume after a transport failure without reopening permanent errors."""
+        retried = False
+        for item in items:
+            if (
+                item.status == ContactEnrichmentRunItemStatus.ERROR
+                and item.last_error_type in _TRANSIENT_ERROR_TYPES
+            ):
+                item.status = ContactEnrichmentRunItemStatus.PENDING
+                item.started_at = None
+                item.finished_at = None
+                item.last_error_type = None
+                item.last_error_message = None
+                run.processed_count -= 1
+                run.error_count -= 1
+                retried = True
+        return retried
 
     def _process_item(
         self, session: Session, run: ContactEnrichmentRun, item: ContactEnrichmentRunItem,

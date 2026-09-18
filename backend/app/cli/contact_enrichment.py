@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import re
 from collections.abc import Callable, Sequence
 from typing import Optional
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
 from app.database import SessionLocal, engine
+from app.models import CompanyEnrichment, ContactEnrichmentRun, ObservedJobOffer
 from app.services.company_enrichment.contracts import MatchStatus
 from app.services.commercial_leads.service import CommercialLeadQuery, list_commercial_leads
 from app.services.contactability.batch import (
@@ -21,7 +24,20 @@ from app.services.contactability.providers.societe_com import (
     SocieteComContactProvider,
     societe_com_inapplicability_reason,
 )
+from app.services.contactability.providers.official_web.contracts import WebsiteSeed
+from app.services.contactability.providers.official_web.fetcher import SecureWebFetcher
+from app.services.contactability.providers.official_web.persistence import (
+    OfficialWebRepository,
+    ensure_official_web_schema,
+)
+from app.services.contactability.providers.official_web.provider import OfficialWebProvider
 from app.services.contactability.targets import ContactIdentityContext, build_contact_targets
+from app.services.contactability.contracts import ContactScope, ContactTarget
+from app.services.contactability.persistence import ensure_contactability_schema
+from app.services.opportunities.company import normalize_company_key
+
+
+_OFFER_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
 
 def select_societe_com_targets(
@@ -49,6 +65,77 @@ def select_societe_com_targets(
     )[:limit])
 
 
+def select_official_web_targets(
+    session: Session, company_keys: Sequence[str], limit: int,
+) -> tuple[ContactTarget, ...]:
+    """Select only explicit company/intermediary targets that already have offer URLs."""
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    requested = tuple(dict.fromkeys(key.strip() for key in company_keys if key.strip()))
+    if not requested:
+        raise ValueError("official_web requires at least one explicit company key")
+    leads = {
+        item.company_key: item
+        for item in list_commercial_leads(
+            session, CommercialLeadQuery(department_code="94", include_excluded=True, limit=None),
+        ).items
+    }
+    selected: list[ContactTarget] = []
+    for key in requested:
+        lead = leads.get(key)
+        if lead is None:
+            raise ValueError("official_web company key is not an active local lead")
+        enrichment = session.scalar(select(CompanyEnrichment).where(
+            CompanyEnrichment.company_key == key, CompanyEnrichment.provider == "dinum",
+        ))
+        targets = build_contact_targets(
+            lead, ContactIdentityContext(match_status=enrichment.match_status if enrichment else None),
+        )
+        for target in targets:
+            if target.scope not in {ContactScope.COMPANY, ContactScope.INTERMEDIARY}:
+                continue
+            if offer_description_website_seeds(session, target):
+                selected.append(target)
+    if len(selected) > limit:
+        raise ValueError("official_web explicit selection exceeds limit")
+    return tuple(selected)
+
+
+def offer_description_website_seeds(
+    session: Session, target: ContactTarget,
+) -> tuple[WebsiteSeed, ...]:
+    """Read existing offer-description URLs only; no search provider is involved."""
+    seeds: dict[str, WebsiteSeed] = {}
+    offers = session.scalars(select(ObservedJobOffer).where(
+        ObservedJobOffer.is_active.is_(True), ObservedJobOffer.department_code == "94",
+    ))
+    for offer in offers:
+        if normalize_company_key(offer.company_name) != target.company_key or not offer.description:
+            continue
+        for match in _OFFER_URL_PATTERN.finditer(offer.description):
+            url = match.group(0).rstrip(".,;:!?)\"")
+            if url:
+                seeds.setdefault(url, WebsiteSeed(
+                    url=url, source_provider="offer_description", observed_at=offer.last_seen_at,
+                    source_url=offer.source_url,
+                ))
+    return tuple(seeds.values())
+
+
+def official_web_provider(session: Session) -> OfficialWebProvider:
+    """Build the provider with real protected HTTP but no Brave client."""
+    settings = get_settings()
+    fetcher = SecureWebFetcher(
+        timeout_seconds=settings.official_web_fetch_timeout_seconds,
+        requests_per_second_per_domain=settings.official_web_fetch_requests_per_second,
+        max_response_bytes=settings.official_web_max_response_bytes,
+    )
+    return OfficialWebProvider(
+        repository=OfficialWebRepository(session), fetcher=fetcher, brave_client=None,
+        seed_loader=lambda target: offer_description_website_seeds(session, target),
+    )
+
+
 def execute_cli(
     argv: Optional[Sequence[str]] = None,
     *,
@@ -61,28 +148,51 @@ def execute_cli(
     parser = argparse.ArgumentParser(description="Durable optional contact enrichment batch")
     commands = parser.add_subparsers(dest="command", required=True)
     new_parser = commands.add_parser("new", help="Create and run a persisted selection")
-    new_parser.add_argument("--provider", choices=["societe_com"], required=True)
+    new_parser.add_argument("--provider", choices=["societe_com", "official_web"], required=True)
     new_parser.add_argument("--department", default="94")
     new_parser.add_argument("--limit", type=int, default=50)
+    new_parser.add_argument("--company-key", action="append", default=[])
     resume_parser = commands.add_parser("resume", help="Resume a persisted selection")
     resume_parser.add_argument("--run-id", type=int, required=True)
     args = parser.parse_args(argv)
 
-    selected_provider = provider or SocieteComContactProvider.from_settings(get_settings())
-    if not selected_provider.is_configured:
-        output("Contact provider is not configured; no run was created.")
-        return 4
     if prepare_schema:
         ensure_contact_enrichment_schema(engine)
+        if args.command == "new" and args.provider == "official_web":
+            ensure_contactability_schema(engine)
+            ensure_official_web_schema(engine)
 
     def progress(run) -> None:
         output(_progress_line(run))
 
-    runner = ContactEnrichmentBatchOrchestrator(selected_provider, progress_callback=progress)
     with session_factory() as session:
         try:
+            selected_provider = provider
+            if selected_provider is None:
+                is_official_web = (
+                    args.command == "new" and args.provider == "official_web"
+                ) or (
+                    args.command == "resume"
+                    and session.scalar(select(ContactEnrichmentRun.provider).where(
+                        ContactEnrichmentRun.id == args.run_id,
+                    )) == "official_web"
+                )
+                selected_provider = (
+                    official_web_provider(session)
+                    if is_official_web
+                    else SocieteComContactProvider.from_settings(get_settings())
+                )
+            if not selected_provider.is_configured:
+                output("Contact provider is not configured; no run was created.")
+                return 4
+            runner = ContactEnrichmentBatchOrchestrator(selected_provider, progress_callback=progress)
             if args.command == "new":
-                run = runner.run(session, target_selector(session, args.department, args.limit))
+                targets = (
+                    select_official_web_targets(session, args.company_key, args.limit)
+                    if args.provider == "official_web"
+                    else target_selector(session, args.department, args.limit)
+                )
+                run = runner.run(session, targets)
             else:
                 run = runner.resume(session, args.run_id)
         except ValueError:

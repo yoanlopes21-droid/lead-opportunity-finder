@@ -30,6 +30,17 @@ _LEGAL_LINK_MARKERS = ("mentions-legales", "mentions_legales", "legal", "impress
 _CONTACT_LINK_MARKERS = ("contact", "nous-contacter", "nous_contacter")
 _LEGAL_SUFFIXES = {"sas", "sarl", "sa", "eurl", "sasu", "scop", "societe", "groupe", "france"}
 _SIREN_CONTEXT = re.compile(r"(?i)\b(?:siren|siret|rcs)\b.{0,50}?((?:\d[ .-]?){9,14})")
+TRANSIENT_FETCH_ERROR_KINDS = frozenset({
+    "dns_error", "timeout", "network", "connection_reset", "rate_limited", "server_error",
+})
+
+
+class WebsiteVerificationTransportError(RuntimeError):
+    """The candidate could not be assessed because transport was unavailable."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(f"website verification transport failed: {kind}")
+        self.kind = kind
 
 
 def verify_website_candidates(
@@ -83,6 +94,8 @@ def _verify_one(
     try:
         homepage = fetcher.fetch(candidate.canonical_url, initial=True)
     except SecureFetchError as exc:
+        if exc.kind in TRANSIENT_FETCH_ERROR_KINDS:
+            raise WebsiteVerificationTransportError(exc.kind) from exc
         return _result(
             target, candidate, candidate_set_fp, WebsiteVerificationStatus.REJECTED,
             0, (), (f"fetch_{exc.kind}",), verified_at,

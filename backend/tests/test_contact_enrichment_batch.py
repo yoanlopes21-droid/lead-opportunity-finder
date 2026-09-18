@@ -351,6 +351,19 @@ def test_contact_success_is_kept_when_directors_fail_and_next_run_only_calls_dir
     assert second.calls == [("acme", "directors")]
 
 
+def test_resume_retries_only_a_transient_terminal_error(session):
+    item = target()
+    first = FakeResourceProvider({
+        (item.company_key, "contact"): [lambda value: error_result(value, "dns_error")],
+    })
+    failed = runner(first, max_retries_per_resource=0)[0].run(session, [item])
+    assert failed.status == ContactEnrichmentRunStatus.COMPLETED_WITH_ERRORS
+    resumed = FakeResourceProvider(completed_actions(item))
+    completed = runner(resumed, now=at(2))[0].resume(session, failed.id)
+    assert completed.status == ContactEnrichmentRunStatus.COMPLETED
+    assert resumed.calls == [("acme", "contact"), ("acme", "directors")]
+
+
 def test_cli_new_and_resume_are_safe_with_mocked_provider(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'contact-cli.sqlite3'}")
     Base.metadata.create_all(engine)
@@ -390,4 +403,36 @@ def test_cli_unconfigured_provider_creates_no_run(tmp_path):
     with factory() as session:
         assert session.scalars(select(ContactEnrichmentRun)).all() == []
     assert code == 4 and "not configured" in output[0]
+    engine.dispose()
+
+
+def test_official_web_cli_requires_explicit_company_keys(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'contact-cli-official.sqlite3'}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    output = []
+    code = execute_cli(
+        ["new", "--provider", "official_web"], session_factory=factory,
+        provider=FakeResourceProvider(), prepare_schema=False, output=output.append,
+    )
+    assert code == 4
+    assert output == ["Contact enrichment batch could not be started or resumed safely."]
+    engine.dispose()
+
+
+def test_official_web_cli_runs_only_the_explicit_mocked_selection(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'contact-cli-official-limited.sqlite3'}")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    item = target()
+    monkeypatch.setattr(
+        "app.cli.contact_enrichment.select_official_web_targets",
+        lambda session, company_keys, limit: (item,) if company_keys == ["acme"] and limit == 1 else (),
+    )
+    provider = FakeResourceProvider(completed_actions(item))
+    code = execute_cli(
+        ["new", "--provider", "official_web", "--limit", "1", "--company-key", "acme"],
+        session_factory=factory, provider=provider, prepare_schema=False, output=lambda _: None,
+    )
+    assert code == 0 and provider.calls == [("acme", "contact"), ("acme", "directors")]
     engine.dispose()

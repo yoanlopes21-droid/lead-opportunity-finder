@@ -273,6 +273,41 @@ def test_exact_siren_is_strong_and_conflict_rejects():
     assert bad.status == WebsiteVerificationStatus.REJECTED
 
 
+def test_initial_dns_failure_is_a_retryable_resource_error_not_a_rejected_website(session):
+    item = target()
+    seed = WebsiteSeed("https://acme.fr", "offer_description", NOW)
+    failing = PageFetcher({"https://acme.fr/": SecureFetchError("dns_error", "DNS unavailable")})
+    provider = OfficialWebProvider(
+        repository=OfficialWebRepository(session), fetcher=failing,
+        seed_loader=lambda _: (seed,), now=lambda: NOW,
+    )
+    batch = ContactEnrichmentBatchOrchestrator(
+        provider, policy=ContactBatchPolicy(max_retries_per_resource=0, commit_each_result=False),
+        clock=lambda: NOW, sleeper=lambda _: None,
+    )
+    failed = batch.run(session, [item])
+    state = session.scalar(select(ContactProviderState).where(
+        ContactProviderState.resource == "verification",
+    ))
+    assert failed.status == "completed_with_errors"
+    assert state.last_status == ContactProviderStatus.ERROR and state.fresh_until is None
+    assert session.scalars(select(VerifiedWebsiteRecord)).all() == []
+
+    recovered_fetcher = PageFetcher({"https://acme.fr/": page(
+        "https://acme.fr/", "ACME INDUSTRIE SAS SIREN 123456789",
+    )})
+    recovered_provider = OfficialWebProvider(
+        repository=OfficialWebRepository(session), fetcher=recovered_fetcher,
+        seed_loader=lambda _: (seed,), now=lambda: NOW,
+    )
+    recovered = ContactEnrichmentBatchOrchestrator(
+        recovered_provider, policy=ContactBatchPolicy(commit_each_result=False),
+        clock=lambda: NOW, sleeper=lambda _: None,
+    ).run(session, [item])
+    assert recovered.status == "completed" and recovered_fetcher.calls
+    assert session.scalar(select(VerifiedWebsiteRecord)).status == WebsiteVerificationStatus.HIGH_CONFIDENCE
+
+
 def test_name_geography_and_legal_page_can_verify_without_siren():
     item = target(siren=None, organization_name_snapshot="ACME INDUSTRIE SAS", display_name_snapshot="ACME INDUSTRIE")
     candidate = _candidate(item)

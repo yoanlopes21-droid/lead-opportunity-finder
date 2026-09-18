@@ -29,7 +29,10 @@ from app.services.contactability.providers.official_web.discovery import (
 from app.services.contactability.providers.official_web.extraction import extract_official_contacts
 from app.services.contactability.providers.official_web.persistence import OfficialWebRepository
 from app.services.contactability.providers.official_web.robots import RobotsTxtPolicy
-from app.services.contactability.providers.official_web.verification import verify_website_candidates
+from app.services.contactability.providers.official_web.verification import (
+    WebsiteVerificationTransportError,
+    verify_website_candidates,
+)
 
 
 PROVIDER_NAME = "official_web"
@@ -166,9 +169,17 @@ class OfficialWebProvider:
             if not candidates:
                 return _result(ContactProviderStatus.NOT_FOUND, target_fp, attempted_at)
             before = int(getattr(self.fetcher, "request_count", 0))
-            verified = verify_website_candidates(
-                target, candidates, fetcher=self.fetcher, verified_at=attempted_at,
-            )
+            try:
+                verified = verify_website_candidates(
+                    target, candidates, fetcher=self.fetcher, verified_at=attempted_at,
+                )
+            except WebsiteVerificationTransportError as exc:
+                calls = int(getattr(self.fetcher, "request_count", before)) - before
+                return _result(
+                    ContactProviderStatus.ERROR, target_fp, attempted_at,
+                    request_count=max(calls, 0), error_type=exc.kind,
+                    warnings=("website_verification_transport_error",),
+                )
             calls = int(getattr(self.fetcher, "request_count", before)) - before
             return _result(
                 ContactProviderStatus.COMPLETED, target_fp, attempted_at,

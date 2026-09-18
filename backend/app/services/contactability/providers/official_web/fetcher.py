@@ -97,6 +97,10 @@ class SecureWebFetcher:
                 current = urljoin(current, location)
                 _validate_public_url(current, self._resolver)
                 continue
+            if status in {408, 425, 429}:
+                raise SecureFetchError("rate_limited", "Website temporarily refused the request")
+            if 500 <= status <= 599:
+                raise SecureFetchError("server_error", "Website server failed temporarily")
             if not 200 <= status <= 299:
                 raise SecureFetchError("http_error", "Website returned an unusable response")
             headers = getattr(response, "headers", {})
