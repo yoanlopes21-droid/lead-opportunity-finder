@@ -152,10 +152,12 @@ class ContactEnrichmentBatchOrchestrator:
             raise ValueError("contact enrichment run does not exist")
         if run.provider != self._provider.name:
             raise ValueError("contact enrichment run provider does not match")
-        if run.status == ContactEnrichmentRunStatus.COMPLETED:
-            return run
         items = self._items(session, run.id)
         self._validate_selection(run, items)
+        self._synchronize_run_counts(run, items)
+        if run.status == ContactEnrichmentRunStatus.COMPLETED:
+            self._durable_flush(session)
+            return run
         retried_errors = self._reset_transient_error_items(run, items)
         if run.status == ContactEnrichmentRunStatus.COMPLETED_WITH_ERRORS and not retried_errors:
             return run
@@ -205,9 +207,8 @@ class ContactEnrichmentBatchOrchestrator:
                 item.finished_at = None
                 item.last_error_type = None
                 item.last_error_message = None
-                run.processed_count -= 1
-                run.error_count -= 1
                 retried = True
+        self._synchronize_run_counts(run, items)
         return retried
 
     def _process_item(
@@ -386,21 +387,14 @@ class ContactEnrichmentBatchOrchestrator:
         error_type: Optional[str] = None,
         all_not_found: bool = False,
     ) -> None:
+        was_terminal = item.status in _TERMINAL_ITEM_STATUSES
         item.status = status
         item.finished_at = self._clock()
         item.last_error_type = _safe_error_type(error_type)
         item.last_error_message = _safe_error_message(error_type)
-        run.processed_count += 1
-        if status == ContactEnrichmentRunItemStatus.CACHED:
-            run.cached_count += 1
-        elif status == ContactEnrichmentRunItemStatus.COMPLETED:
-            run.completed_count += 1
-            if all_not_found:
-                run.not_found_count += 1
-        elif status == ContactEnrichmentRunItemStatus.NOT_APPLICABLE:
-            run.not_applicable_count += 1
-        elif status == ContactEnrichmentRunItemStatus.ERROR:
-            run.error_count += 1
+        if status == ContactEnrichmentRunItemStatus.COMPLETED and all_not_found and not was_terminal:
+            run.not_found_count += 1
+        self._synchronize_run_counts(run, self._items(session, run.id))
         self._durable_flush(session)
         self._notify(run)
 
@@ -409,6 +403,21 @@ class ContactEnrichmentBatchOrchestrator:
         run.finished_at = self._clock()
         self._durable_flush(session)
         self._notify(run)
+
+    def _synchronize_run_counts(
+        self, run: ContactEnrichmentRun, items: tuple[ContactEnrichmentRunItem, ...],
+    ) -> None:
+        """Derive durable progress from item state so an interrupted resume is idempotent."""
+        counts = {status: 0 for status in _TERMINAL_ITEM_STATUSES}
+        for item in items:
+            if item.status in counts:
+                counts[item.status] += 1
+        run.processed_count = sum(counts.values())
+        run.cached_count = counts[ContactEnrichmentRunItemStatus.CACHED]
+        run.completed_count = counts[ContactEnrichmentRunItemStatus.COMPLETED]
+        run.not_applicable_count = counts[ContactEnrichmentRunItemStatus.NOT_APPLICABLE]
+        run.error_count = counts[ContactEnrichmentRunItemStatus.ERROR]
+        run.not_found_count = min(run.not_found_count, run.completed_count)
 
     def _validate_selection(
         self, run: ContactEnrichmentRun, items: tuple[ContactEnrichmentRunItem, ...],

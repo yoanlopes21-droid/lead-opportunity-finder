@@ -33,6 +33,7 @@ _SIREN_CONTEXT = re.compile(r"(?i)\b(?:siren|siret|rcs)\b.{0,50}?((?:\d[ .-]?){9
 TRANSIENT_FETCH_ERROR_KINDS = frozenset({
     "dns_error", "timeout", "network", "connection_reset", "rate_limited", "server_error",
 })
+TECHNICAL_FETCH_ERROR_KINDS = frozenset({"response_too_large", "unsupported_content"})
 
 
 class WebsiteVerificationTransportError(RuntimeError):
@@ -40,6 +41,14 @@ class WebsiteVerificationTransportError(RuntimeError):
 
     def __init__(self, kind: str) -> None:
         super().__init__(f"website verification transport failed: {kind}")
+        self.kind = kind
+
+
+class WebsiteVerificationTechnicalError(RuntimeError):
+    """The page was reached but could not be safely assessed as HTML."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(f"website verification technical failure: {kind}")
         self.kind = kind
 
 
@@ -96,6 +105,8 @@ def _verify_one(
     except SecureFetchError as exc:
         if exc.kind in TRANSIENT_FETCH_ERROR_KINDS:
             raise WebsiteVerificationTransportError(exc.kind) from exc
+        if exc.kind in TECHNICAL_FETCH_ERROR_KINDS:
+            raise WebsiteVerificationTechnicalError(exc.kind) from exc
         return _result(
             target, candidate, candidate_set_fp, WebsiteVerificationStatus.REJECTED,
             0, (), (f"fetch_{exc.kind}",), verified_at,

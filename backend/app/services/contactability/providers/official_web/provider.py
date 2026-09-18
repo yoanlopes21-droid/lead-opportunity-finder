@@ -30,6 +30,7 @@ from app.services.contactability.providers.official_web.extraction import extrac
 from app.services.contactability.providers.official_web.persistence import OfficialWebRepository
 from app.services.contactability.providers.official_web.robots import RobotsTxtPolicy
 from app.services.contactability.providers.official_web.verification import (
+    WebsiteVerificationTechnicalError,
     WebsiteVerificationTransportError,
     verify_website_candidates,
 )
@@ -173,12 +174,16 @@ class OfficialWebProvider:
                 verified = verify_website_candidates(
                     target, candidates, fetcher=self.fetcher, verified_at=attempted_at,
                 )
-            except WebsiteVerificationTransportError as exc:
+            except (WebsiteVerificationTransportError, WebsiteVerificationTechnicalError) as exc:
                 calls = int(getattr(self.fetcher, "request_count", before)) - before
                 return _result(
                     ContactProviderStatus.ERROR, target_fp, attempted_at,
                     request_count=max(calls, 0), error_type=exc.kind,
-                    warnings=("website_verification_transport_error",),
+                    warnings=(
+                        "website_verification_transport_error"
+                        if isinstance(exc, WebsiteVerificationTransportError)
+                        else "website_verification_technical_error",
+                    ),
                 )
             calls = int(getattr(self.fetcher, "request_count", before)) - before
             return _result(

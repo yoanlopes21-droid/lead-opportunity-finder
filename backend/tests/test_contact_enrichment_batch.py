@@ -286,6 +286,7 @@ def test_interruption_preserves_completed_items_and_resume_keeps_order(session):
     assert completed.status == ContactEnrichmentRunStatus.COMPLETED
     assert resume.calls == [("second", "contact"), ("second", "directors")]
     assert [item.company_key for item in items] == ["first", "second"]
+    assert completed.processed_count == completed.selected_count == 2
 
 
 def test_orphan_processing_becomes_pending_and_inconsistent_run_is_refused(session):
@@ -362,6 +363,19 @@ def test_resume_retries_only_a_transient_terminal_error(session):
     completed = runner(resumed, now=at(2))[0].resume(session, failed.id)
     assert completed.status == ContactEnrichmentRunStatus.COMPLETED
     assert resumed.calls == [("acme", "contact"), ("acme", "directors")]
+    assert completed.processed_count == completed.selected_count == 1
+
+
+def test_repeated_resume_is_idempotent_for_terminal_items(session):
+    first, second = target("first"), target("second")
+    batch, _ = runner(FakeResourceProvider({
+        **completed_actions(first), **completed_actions(second),
+    }))
+    completed = batch.run(session, [first, second])
+    again = batch.resume(session, completed.id)
+    once_more = batch.resume(session, completed.id)
+    assert completed.processed_count == again.processed_count == once_more.processed_count == 2
+    assert once_more.processed_count <= once_more.selected_count
 
 
 def test_cli_new_and_resume_are_safe_with_mocked_provider(tmp_path):

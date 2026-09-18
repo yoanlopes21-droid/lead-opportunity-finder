@@ -23,6 +23,13 @@ from app.services.contactability.providers.official_web.fetcher import SecureFet
 _PAGE_MARKERS = ("contact", "nous-contacter", "mentions", "legal", "equipe", "team", "recrut", "carriere", "emploi", "magasin", "boutique", "store", "agence", "localisation", "location")
 _CONTACT_MARKERS = ("contact", "nous-contacter")
 _EDITORIAL_MARKERS = ("blog", "actualit", "news", "temoign", "testimonial")
+_PERSON_FORBIDDEN_PAGE_MARKERS = (
+    "mentions", "legal", "privacy", "confidential", "cgu", "conditions",
+)
+_ORGANIZATION_NAME_MARKERS = {
+    "association", "company", "direction", "groupe", "legal", "legales", "mentions",
+    "sarl", "sas", "sasu", "sau", "sa", "scop", "societe", "specific", "specifiques",
+}
 _EMAIL = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 _PHONE = re.compile(r"(?<!\w)(?:\+33\s?\(?0?\)?|0)[1-9](?:[ .-]?\d{2}){4}(?!\w)")
 _PERSON_AFTER = re.compile(r"\b([A-ZÀ-ÖØ-Þ][\w'’-]+(?:\s+[A-ZÀ-ÖØ-Þ][\w'’-]+){1,3})\s*(?:[-–—,:|]|est)\s*([^.;]{3,100})", re.UNICODE)
@@ -68,7 +75,7 @@ def extract_official_contacts(
                 points.append(_point(target, ContactType.PROFESSIONAL_URL, page.final_url, evidence))
             if page is homepage:
                 points.append(_point(target, ContactType.WEBSITE, site.canonical_url, evidence))
-            if not _is_editorial_url(page.final_url):
+            if _is_person_source_url(page.final_url):
                 people.extend(_people_from_page(target, page.final_url, page.text, observed_at))
     calls = int(getattr(fetcher, "request_count", before)) - before
     return _dedupe_points(points), _dedupe_people(people), max(calls, 0), tuple(dict.fromkeys(warnings))
@@ -129,7 +136,7 @@ def _people_from_page(target, url, text, observed_at):
     for name, title in pairs:
         role = _role(title)
         normalized = normalize_person_name(name)
-        if role is None or not normalized or len(normalized.split()) < 2:
+        if role is None or not _looks_like_person_name(normalized, target):
             continue
         excerpt = _excerpt(text, name)
         evidence = ContactEvidenceCandidate(
@@ -178,5 +185,21 @@ def _excerpt(text, needle):
 
 def _is_contact_url(url): return any(marker in urlsplit(url).path.casefold() for marker in _CONTACT_MARKERS)
 def _is_editorial_url(url): return any(marker in urlsplit(url).path.casefold() for marker in _EDITORIAL_MARKERS)
+def _is_person_source_url(url):
+    path = urlsplit(url).path.casefold()
+    return not _is_editorial_url(url) and not any(marker in path for marker in _PERSON_FORBIDDEN_PAGE_MARKERS)
+
+
+def _looks_like_person_name(value, target):
+    parts = value.split()
+    if not 2 <= len(parts) <= 4 or any(len(part) < 2 or len(part) > 40 for part in parts):
+        return False
+    if any(part in _ORGANIZATION_NAME_MARKERS for part in parts):
+        return False
+    organization = normalize_person_name(target.organization_name_snapshot) or ""
+    organization_parts = [part for part in organization.split() if len(part) >= 3]
+    return not (len(organization_parts) >= 2 and all(part in parts for part in organization_parts))
+
+
 def _dedupe_points(items): return tuple({(x.contact_type, x.normalized_value, x.scope, x.local_key): x for x in items if x}.values())
 def _dedupe_people(items): return tuple({(x.normalized_name, x.scope, x.local_key): x for x in items}.values())

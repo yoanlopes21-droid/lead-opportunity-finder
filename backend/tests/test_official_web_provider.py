@@ -308,6 +308,26 @@ def test_initial_dns_failure_is_a_retryable_resource_error_not_a_rejected_websit
     assert session.scalar(select(VerifiedWebsiteRecord)).status == WebsiteVerificationStatus.HIGH_CONFIDENCE
 
 
+def test_oversized_response_is_a_non_cacheable_technical_error_not_a_rejected_website(session):
+    item = target()
+    seed = WebsiteSeed("https://acme.fr", "offer_description", NOW)
+    failing = PageFetcher({"https://acme.fr/": SecureFetchError("response_too_large", "response too large")})
+    provider = OfficialWebProvider(
+        repository=OfficialWebRepository(session), fetcher=failing,
+        seed_loader=lambda _: (seed,), now=lambda: NOW,
+    )
+    run = ContactEnrichmentBatchOrchestrator(
+        provider, policy=ContactBatchPolicy(max_retries_per_resource=0, commit_each_result=False),
+        clock=lambda: NOW, sleeper=lambda _: None,
+    ).run(session, [item])
+    state = session.scalar(select(ContactProviderState).where(
+        ContactProviderState.resource == "verification",
+    ))
+    assert run.status == "completed_with_errors"
+    assert state.last_status == ContactProviderStatus.ERROR and state.fresh_until is None
+    assert session.scalars(select(VerifiedWebsiteRecord)).all() == []
+
+
 def test_name_geography_and_legal_page_can_verify_without_siren():
     item = target(siren=None, organization_name_snapshot="ACME INDUSTRIE SAS", display_name_snapshot="ACME INDUSTRIE")
     candidate = _candidate(item)
@@ -420,6 +440,24 @@ def test_extraction_keeps_public_contacts_people_and_minimal_evidence(session):
     assert all(point.confidence_level == "high_confidence" for point in points)
     assert all(point.verification_status == "source_verified" for point in points)
     assert all(evidence.source_url and len(evidence.excerpt or "") <= 500 for point in points for evidence in point.evidence)
+
+
+def test_person_extraction_skips_legal_pages_and_organization_like_names():
+    item = target()
+    candidate = _candidate(item)
+    contact_url, legal_url = "https://acme.fr/contact", "https://acme.fr/mentions-legales"
+    fetcher = PageFetcher({
+        "https://acme.fr/": page("https://acme.fr/", "ACME INDUSTRIE SAS SIREN 123456789", (contact_url, legal_url)),
+        contact_url: page(contact_url, "Alice Martin - Directrice des ressources humaines"),
+        legal_url: page(legal_url, "Mentions légales spécifiques - Directeur SAU ACME INDUSTRIE Ce - Responsable"),
+    })
+    verified = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)
+    class AllowRobots:
+        def allowed(self, url, user_agent): return True
+    _, people, _, _ = extract_official_contacts(
+        item, verified, fetcher=fetcher, observed_at=NOW, robots_policy=AllowRobots(),
+    )
+    assert [(person.full_name, person.relevance_role) for person in people] == [("Alice Martin", "hr")]
 
 
 def test_local_extraction_never_propagates_without_explicit_location():
