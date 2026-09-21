@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.cli.contact_enrichment import execute_cli
+from app.cli import contact_enrichment as contact_enrichment_cli
+from app.cli.contact_enrichment import execute_cli, select_official_web_targets
 from app.database import Base
 from app.models import (
     ContactEnrichmentRun,
@@ -441,7 +443,9 @@ def test_official_web_cli_runs_only_the_explicit_mocked_selection(tmp_path, monk
     item = target()
     monkeypatch.setattr(
         "app.cli.contact_enrichment.select_official_web_targets",
-        lambda session, company_keys, limit: (item,) if company_keys == ["acme"] and limit == 1 else (),
+        lambda session, company_keys, limit, **kwargs: (
+            (item,) if company_keys == ["acme"] and limit == 1 and not kwargs["offer_description_only"] else ()
+        ),
     )
     provider = FakeResourceProvider(completed_actions(item))
     code = execute_cli(
@@ -450,3 +454,52 @@ def test_official_web_cli_runs_only_the_explicit_mocked_selection(tmp_path, monk
     )
     assert code == 0 and provider.calls == [("acme", "contact"), ("acme", "directors")]
     engine.dispose()
+
+
+def test_explicit_official_web_selection_includes_company_without_offer_url(monkeypatch):
+    company = target("unseeded")
+    local = target("unseeded", scope=ContactScope.LOCAL, local_key="commune:94000")
+    monkeypatch.setattr(
+        contact_enrichment_cli, "list_commercial_leads",
+        lambda *args, **kwargs: SimpleNamespace(items=(SimpleNamespace(company_key="unseeded"),)),
+    )
+    monkeypatch.setattr(
+        contact_enrichment_cli, "build_contact_targets", lambda lead, identity: (company, local),
+    )
+    monkeypatch.setattr(contact_enrichment_cli, "offer_description_website_seeds", lambda *args: ())
+    session = SimpleNamespace(scalar=lambda statement: None)
+
+    assert select_official_web_targets(session, ["unseeded"], 1) == (company,)
+
+
+def test_offer_description_only_mode_keeps_legacy_seed_filter(monkeypatch):
+    company = target("seedless")
+    monkeypatch.setattr(
+        contact_enrichment_cli, "list_commercial_leads",
+        lambda *args, **kwargs: SimpleNamespace(items=(SimpleNamespace(company_key="seedless"),)),
+    )
+    monkeypatch.setattr(contact_enrichment_cli, "build_contact_targets", lambda lead, identity: (company,))
+    monkeypatch.setattr(contact_enrichment_cli, "offer_description_website_seeds", lambda *args: ())
+    session = SimpleNamespace(scalar=lambda statement: None)
+
+    assert select_official_web_targets(
+        session, ["seedless"], 1, offer_description_only=True,
+    ) == ()
+
+
+def test_explicit_official_web_selection_rejects_requests_over_limit(monkeypatch):
+    first, second = target("first"), target("second")
+    by_key = {"first": first, "second": second}
+    monkeypatch.setattr(
+        contact_enrichment_cli, "list_commercial_leads",
+        lambda *args, **kwargs: SimpleNamespace(
+            items=tuple(SimpleNamespace(company_key=key) for key in by_key),
+        ),
+    )
+    monkeypatch.setattr(
+        contact_enrichment_cli, "build_contact_targets", lambda lead, identity: (by_key[lead.company_key],),
+    )
+    session = SimpleNamespace(scalar=lambda statement: None)
+
+    with pytest.raises(ValueError, match="exceeds limit"):
+        select_official_web_targets(session, ["first", "second"], 1)

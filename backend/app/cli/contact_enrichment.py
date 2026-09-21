@@ -68,9 +68,15 @@ def select_societe_com_targets(
 
 
 def select_official_web_targets(
-    session: Session, company_keys: Sequence[str], limit: int,
+    session: Session, company_keys: Sequence[str], limit: int, *,
+    offer_description_only: bool = False,
 ) -> tuple[ContactTarget, ...]:
-    """Select only explicit company/intermediary targets that already have offer URLs."""
+    """Select explicit non-local targets for official-web discovery.
+
+    An explicit company selection is sufficient for Brave discovery: an offer
+    description URL is an optional seed, not an eligibility condition.  The
+    former seed-only selection remains available for controlled legacy runs.
+    """
     if limit < 1:
         raise ValueError("limit must be positive")
     requested = tuple(dict.fromkeys(key.strip() for key in company_keys if key.strip()))
@@ -96,8 +102,9 @@ def select_official_web_targets(
         for target in targets:
             if target.scope not in {ContactScope.COMPANY, ContactScope.INTERMEDIARY}:
                 continue
-            if offer_description_website_seeds(session, target):
-                selected.append(target)
+            if offer_description_only and not offer_description_website_seeds(session, target):
+                continue
+            selected.append(target)
     if len(selected) > limit:
         raise ValueError("official_web explicit selection exceeds limit")
     return tuple(selected)
@@ -168,6 +175,10 @@ def execute_cli(
     new_parser.add_argument("--department", default="94")
     new_parser.add_argument("--limit", type=int, default=50)
     new_parser.add_argument("--company-key", action="append", default=[])
+    new_parser.add_argument(
+        "--offer-description-only", action="store_true",
+        help="Restrict official_web to targets that already have an offer-description URL seed.",
+    )
     resume_parser = commands.add_parser("resume", help="Resume a persisted selection")
     resume_parser.add_argument("--run-id", type=int, required=True)
     args = parser.parse_args(argv)
@@ -205,7 +216,10 @@ def execute_cli(
             runner = ContactEnrichmentBatchOrchestrator(selected_provider, progress_callback=progress)
             if args.command == "new":
                 targets = (
-                    select_official_web_targets(session, args.company_key, args.limit)
+                    select_official_web_targets(
+                        session, args.company_key, args.limit,
+                        offer_description_only=args.offer_description_only,
+                    )
                     if args.provider == "official_web"
                     else target_selector(session, args.department, args.limit)
                 )
