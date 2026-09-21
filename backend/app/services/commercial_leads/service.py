@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import CommercialExclusion, CompanyEnrichment, ObservedJobOffer
+from app.models import (
+    CommercialExclusion,
+    CompanyEnrichment,
+    ContactEvidence,
+    ContactPoint,
+    ObservedJobOffer,
+    PersonContact,
+    VerifiedWebsiteRecord,
+)
 from app.services.commercial_leads.exclusions import (
     CommercialExclusionRecord,
     ExclusionDecision,
@@ -29,6 +37,12 @@ from app.services.scoring.company import (
     EnrichmentSnapshot,
     score_company_opportunity,
 )
+from app.services.contactability.contracts import ContactScope, ContactTarget, VerificationStatus
+from app.services.contactability.strategy import (
+    ContactStrategy,
+    StrategyEvidenceReference,
+    build_contact_strategy,
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +50,17 @@ class LeadEvidence:
     source_name: str
     source_url: Optional[str]
     observed_at: datetime
+
+
+@dataclass(frozen=True)
+class ContactabilityFacts:
+    """Already-persisted contact facts for one commercial key, loaded in batches."""
+
+    contact_points: tuple[ContactPoint, ...] = ()
+    people: tuple[PersonContact, ...] = ()
+    evidence_by_contact_point_id: dict[int, tuple[ContactEvidence, ...]] = field(default_factory=dict)
+    evidence_by_person_contact_id: dict[int, tuple[ContactEvidence, ...]] = field(default_factory=dict)
+    verified_websites: tuple[VerifiedWebsiteRecord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -60,6 +85,8 @@ class CommercialLead:
     is_eligible: bool
     exclusion: Optional[CommercialExclusionRecord]
     recommended_channel: Optional[str] = None
+    contactability: ContactabilityFacts = field(default_factory=ContactabilityFacts)
+    contact_strategy: Optional[ContactStrategy] = None
 
 
 @dataclass(frozen=True)
@@ -122,6 +149,8 @@ def list_commercial_leads(
     ordered = sorted(filtered, key=lambda item: (-item.scoring.total_score, item.company_name.casefold(), item.company_key))
     total_count = len(ordered)
     paged = ordered[query.offset:] if query.limit is None else ordered[query.offset:query.offset + query.limit]
+    facts_by_key = _contactability_by_company_key(session, (item.company_key for item in paged))
+    paged = tuple(_attach_contactability(item, facts_by_key.get(item.company_key, ContactabilityFacts())) for item in paged)
     return CommercialLeadPage(
         items=tuple(paged), total_count=total_count, offset=query.offset, limit=query.limit
     )
@@ -212,3 +241,99 @@ def _evidence_by_company_key(
         ))
         for key, values in grouped.items()
     }
+
+
+def _contactability_by_company_key(
+    session: Session, company_keys: object,
+) -> dict[str, ContactabilityFacts]:
+    """Load all contactability relations in bounded set queries, never per lead."""
+    keys = tuple(sorted(set(company_keys)))
+    if not keys:
+        return {}
+    points = tuple(session.scalars(select(ContactPoint).where(ContactPoint.company_key.in_(keys)).order_by(ContactPoint.id)))
+    people = tuple(session.scalars(select(PersonContact).where(PersonContact.company_key.in_(keys)).order_by(PersonContact.id)))
+    point_ids = tuple(item.id for item in points)
+    person_ids = tuple(item.id for item in people)
+    clauses = []
+    if point_ids:
+        clauses.append(ContactEvidence.contact_point_id.in_(point_ids))
+    if person_ids:
+        clauses.append(ContactEvidence.person_contact_id.in_(person_ids))
+    evidence = tuple(session.scalars(select(ContactEvidence).where(or_(*clauses)).order_by(ContactEvidence.id))) if clauses else ()
+    websites = tuple(session.scalars(select(VerifiedWebsiteRecord).where(VerifiedWebsiteRecord.company_key.in_(keys)).order_by(VerifiedWebsiteRecord.id)))
+
+    points_by_key: dict[str, list[ContactPoint]] = {key: [] for key in keys}
+    people_by_key: dict[str, list[PersonContact]] = {key: [] for key in keys}
+    for item in points:
+        points_by_key.setdefault(item.company_key, []).append(item)
+    for item in people:
+        people_by_key.setdefault(item.company_key, []).append(item)
+    evidence_by_point: dict[int, list[ContactEvidence]] = {}
+    evidence_by_person: dict[int, list[ContactEvidence]] = {}
+    for item in evidence:
+        if item.contact_point_id is not None:
+            evidence_by_point.setdefault(item.contact_point_id, []).append(item)
+        if item.person_contact_id is not None:
+            evidence_by_person.setdefault(item.person_contact_id, []).append(item)
+    websites_by_key: dict[str, list[VerifiedWebsiteRecord]] = {key: [] for key in keys}
+    for item in websites:
+        websites_by_key.setdefault(item.company_key, []).append(item)
+    return {
+        key: ContactabilityFacts(
+            contact_points=tuple(points_by_key.get(key, ())),
+            people=tuple(people_by_key.get(key, ())),
+            evidence_by_contact_point_id={item.id: tuple(evidence_by_point.get(item.id, ())) for item in points_by_key.get(key, ())},
+            evidence_by_person_contact_id={item.id: tuple(evidence_by_person.get(item.id, ())) for item in people_by_key.get(key, ())},
+            verified_websites=tuple(websites_by_key.get(key, ())),
+        )
+        for key in keys
+    }
+
+
+def _attach_contactability(lead: CommercialLead, facts: ContactabilityFacts) -> CommercialLead:
+    """Recalculate the primary strategy from preloaded facts, without provider I/O."""
+    relationship = lead.scoring.employer_relationship_status
+    scope = ContactScope.INTERMEDIARY if relationship == "intermediary" else ContactScope.COMPANY
+    target = ContactTarget(
+        company_key=lead.company_key,
+        organization_name_snapshot=lead.official_name or lead.company_name,
+        scope=scope,
+        siren=lead.siren,
+        local_key=None,
+        local_commune_snapshot=None,
+        local_location_label_snapshot=None,
+        employer_relationship_status=relationship,
+        identity_match_status="matched_high_confidence" if lead.siren else None,
+        warnings=(
+            ("Les coordonnées sont attribuées à l'intermédiaire, pas à un employeur final.",)
+            if scope == ContactScope.INTERMEDIARY else
+            (("Intermédiaire ou diffuseur possible : vérification recommandée avant attribution.",)
+             if relationship == "intermediary_suspected" else ())
+        ),
+    )
+    people = tuple(item for item in facts.people if item.scope == scope and item.is_active and item.verification_status != VerificationStatus.REJECTED)
+    points = tuple(item for item in facts.contact_points if item.scope == scope and item.is_active)
+    evidence = _strategy_evidence(facts, people, points)
+    strategy = build_contact_strategy(
+        target, people, points,
+        employee_range=lead.employee_range,
+        recruitment_context=lead.representative_job_titles,
+        evidence_references=evidence,
+    )
+    return replace(lead, contactability=facts, contact_strategy=strategy)
+
+
+def _strategy_evidence(
+    facts: ContactabilityFacts,
+    people: tuple[PersonContact, ...],
+    points: tuple[ContactPoint, ...],
+) -> tuple[StrategyEvidenceReference, ...]:
+    rows = []
+    for person in people:
+        rows.extend(facts.evidence_by_person_contact_id.get(person.id, ()))
+    for point in points:
+        rows.extend(facts.evidence_by_contact_point_id.get(point.id, ()))
+    return tuple(StrategyEvidenceReference(
+        evidence_id=item.id, provider=item.provider, source_name=item.source_name,
+        source_url=item.source_url, evidence_reason=item.evidence_reason,
+    ) for item in sorted({item.id: item for item in rows}.values(), key=lambda item: item.id))

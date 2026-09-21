@@ -30,3 +30,33 @@ fichier et ne persiste rien.
 pour les inclure. Les filtres disponibles sont le département, la catégorie, le
 secteur, le score minimum et une pagination simple. Le tri est déterministe :
 score décroissant, puis nom et clé entreprise.
+
+## Contactabilité exposée
+
+`GET /api/v1/commercial-leads` conserve tous ses champs V1 et ajoute, pour chaque
+lead, des champs de lecture seule :
+
+- `contacts` : coordonnées normalisées, leur portée (`company`, `local`,
+  `intermediary` ou `unknown`), état de vérification, fraîcheur et preuves
+  compactes ;
+- `people` : personnes actives pertinentes, leur rôle sourcé et les identifiants
+  de leurs coordonnées liées ;
+- `contact_strategy` : recommandation recalculée à la demande (cible, canal,
+  alternatives, confiance, avertissements, informations manquantes et preuves) ;
+- `contactability_summary` : statut compact du site officiel et contexte de
+  recrutement utilisable avant prise de contact.
+
+Les coordonnées locales restent liées à leur `local_key`; elles sont également
+référencées dans la sous-opportunité correspondante via `contact_point_ids` et
+`person_contact_ids`. Une coordonnée d'entreprise n'est jamais propagée à une
+sous-opportunité locale.
+
+Le calcul ne lance aucun provider, aucun appel réseau, ni aucune recherche Brave.
+Les données Societe.com éventuellement déjà persistées sont lues comme toute
+autre provenance, sans configuration ni appel à ce fournisseur. Les coordonnées
+`review_needed`, ambiguës, obsolètes ou rejetées restent explicables dans la
+réponse mais ne sont pas promues en canal recommandé fiable.
+
+Les relations sont chargées par ensembles pour la page demandée (coordonnées,
+personnes, preuves et statuts web), puis la stratégie est calculée en mémoire;
+il n'y a pas de requête contacts/personnes/preuves par lead.

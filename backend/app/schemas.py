@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -83,6 +83,91 @@ class LocalOpportunityResponse(BaseModel):
     source_offer_ids: list[str]
     source_urls: list[str]
     signals: list[OpportunitySignalResponse]
+    contact_point_ids: list[int] = Field(default_factory=list)
+    person_contact_ids: list[int] = Field(default_factory=list)
+
+
+class ContactProvenanceResponse(BaseModel):
+    id: int
+    provider: str
+    source_url: Optional[str]
+    source_type: str
+    observed_at: datetime
+    short_excerpt: Optional[str]
+    confidence: Optional[str]
+    reason: Optional[str]
+
+
+class ContactPointResponse(BaseModel):
+    id: int
+    type: str
+    value: str
+    scope: str
+    local_key: Optional[str]
+    confidence: str
+    verification_status: str
+    provider: Optional[str]
+    person_contact_id: Optional[int]
+    observed_at: Optional[datetime]
+    last_verified_at: Optional[datetime]
+    stale: bool
+    evidence: list[ContactProvenanceResponse]
+    warnings: list[str] = Field(default_factory=list)
+
+
+class PersonContactResponse(BaseModel):
+    id: int
+    display_name: str
+    relevance: str
+    role_title: Optional[str]
+    scope: str
+    local_key: Optional[str]
+    confidence: str
+    verification_status: str
+    contact_point_ids: list[int]
+    provenance: list[ContactProvenanceResponse]
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ContactStrategyResponse(BaseModel):
+    target_type: str
+    preferred_channel: str
+    preferred_contact_point_id: Optional[int]
+    preferred_person_contact_id: Optional[int]
+    fallback_channels: list[str]
+    confidence: str
+    rationale_codes: list[str]
+    short_context: str
+    warnings: list[str]
+    missing_information: list[str]
+    evidence: list[ContactProvenanceResponse]
+    scope: str
+    local_key: Optional[str]
+
+
+class OfficialWebStatusResponse(BaseModel):
+    verified_site_status: Optional[str]
+    verified_domain: Optional[str]
+    verification_score: int
+    provider: Optional[str]
+    warnings: list[str]
+
+
+class RecruitmentContextResponse(BaseModel):
+    active_offer_count: int
+    representative_roles: list[str]
+    newest_offer_date: Optional[str]
+    primary_location: Optional[str]
+    employee_range: Optional[str]
+    employer_relationship_status: str
+    scoring_reason_codes: list[str]
+
+
+class ContactabilitySummaryResponse(BaseModel):
+    scope: str
+    official_web: OfficialWebStatusResponse
+    recruitment_context: RecruitmentContextResponse
+    warnings: list[str]
 
 
 class IntermediaryDescriptionExampleResponse(BaseModel):
@@ -143,6 +228,10 @@ class CommercialLeadResponse(BaseModel):
     is_eligible: bool
     exclusion: Optional[CommercialExclusionResponse]
     recommended_channel: Optional[str]
+    contacts: list[ContactPointResponse] = Field(default_factory=list)
+    people: list[PersonContactResponse] = Field(default_factory=list)
+    contact_strategy: ContactStrategyResponse
+    contactability_summary: ContactabilitySummaryResponse
 
     @classmethod
     def from_lead(cls, lead) -> "CommercialLeadResponse":
@@ -174,6 +263,8 @@ class CommercialLeadResponse(BaseModel):
                 source_offer_ids=list(item.source_offer_ids),
                 source_urls=list(item.source_urls),
                 signals=[OpportunitySignalResponse(**signal.__dict__) for signal in item.signals],
+                contact_point_ids=sorted(point.id for point in lead.contactability.contact_points if point.scope == "local" and point.local_key == item.local_key),
+                person_contact_ids=sorted(person.id for person in lead.contactability.people if person.scope == "local" and person.local_key == item.local_key and person.is_active and person.verification_status != "rejected"),
             ) for item in lead.local_opportunities],
             latent_signals=[OpportunitySignalResponse(**item.__dict__) for item in lead.latent_signals],
             total_score=lead.scoring.total_score,
@@ -201,7 +292,138 @@ class CommercialLeadResponse(BaseModel):
             is_eligible=lead.is_eligible,
             exclusion=(CommercialExclusionResponse(**lead.exclusion.__dict__) if lead.exclusion else None),
             recommended_channel=lead.recommended_channel,
+            contacts=[_contact_point_response(item, lead) for item in lead.contactability.contact_points],
+            people=[_person_contact_response(item, lead) for item in lead.contactability.people if item.is_active and item.verification_status != "rejected"],
+            contact_strategy=_strategy_response(lead),
+            contactability_summary=_contactability_summary(lead),
         )
+
+
+def _provenance_responses(rows, confidence: Optional[str]) -> list[ContactProvenanceResponse]:
+    """Keep compact, useful distinct sources; never return provider payloads or HTML."""
+    unique = {}
+    for row in rows:
+        key = (row.provider, row.source_name, row.source_url, row.evidence_reason, row.excerpt)
+        current = unique.get(key)
+        if current is None or row.observed_at > current.observed_at:
+            unique[key] = row
+    return [ContactProvenanceResponse(
+        id=row.id,
+        provider=row.provider,
+        source_url=row.source_url,
+        source_type=row.source_name,
+        observed_at=row.observed_at,
+        short_excerpt=(row.excerpt[:400] if row.excerpt else None),
+        confidence=confidence,
+        reason=row.evidence_reason,
+    ) for row in sorted(unique.values(), key=lambda item: (item.provider, item.source_url or "", item.id))]
+
+
+def _contact_point_response(point, lead) -> ContactPointResponse:
+    evidence = lead.contactability.evidence_by_contact_point_id.get(point.id, ())
+    warnings = []
+    if point.verification_status == "rejected":
+        warnings.append("Coordonnée rejetée : ne pas utiliser comme canal de contact.")
+    elif point.verification_status == "stale" or not point.is_active:
+        warnings.append("Coordonnée obsolète ou inactive : vérification requise avant usage.")
+    elif point.confidence_level in {"review_needed", "ambiguous"}:
+        warnings.append("Coordonnée non recommandée comme canal fiable sans vérification.")
+    return ContactPointResponse(
+        id=point.id,
+        type=point.contact_type,
+        value=point.normalized_value,
+        scope=point.scope,
+        local_key=point.local_key,
+        confidence=point.confidence_level,
+        verification_status=point.verification_status,
+        provider=(evidence[0].provider if evidence else None),
+        person_contact_id=point.person_contact_id,
+        observed_at=point.first_observed_at,
+        last_verified_at=(point.last_observed_at if point.verification_status in {"source_verified", "manually_verified"} else None),
+        stale=point.verification_status == "stale" or not point.is_active,
+        evidence=_provenance_responses(evidence, point.confidence_level),
+        warnings=warnings,
+    )
+
+
+def _person_contact_response(person, lead) -> PersonContactResponse:
+    evidence = lead.contactability.evidence_by_person_contact_id.get(person.id, ())
+    warnings = []
+    if person.verification_status == "unverified":
+        warnings.append("Rôle identifié mais non vérifié par la source.")
+    if person.verification_status == "stale":
+        warnings.append("Information personne obsolète : vérification requise.")
+    return PersonContactResponse(
+        id=person.id,
+        display_name=person.full_name,
+        relevance=person.relevance_role,
+        role_title=person.job_title,
+        scope=person.scope,
+        local_key=person.local_key,
+        confidence=person.confidence_level,
+        verification_status=person.verification_status,
+        contact_point_ids=sorted(point.id for point in lead.contactability.contact_points if point.person_contact_id == person.id),
+        provenance=_provenance_responses(evidence, person.confidence_level),
+        warnings=warnings,
+    )
+
+
+def _strategy_response(lead) -> ContactStrategyResponse:
+    strategy = lead.contact_strategy
+    assert strategy is not None
+    evidence_by_id = {
+        row.id: row
+        for rows in (*lead.contactability.evidence_by_contact_point_id.values(), *lead.contactability.evidence_by_person_contact_id.values())
+        for row in rows
+    }
+    rows = [evidence_by_id[item.evidence_id] for item in strategy.evidence_references if item.evidence_id in evidence_by_id]
+    return ContactStrategyResponse(
+        target_type=strategy.target_type,
+        preferred_channel=strategy.preferred_channel,
+        preferred_contact_point_id=strategy.contact_point_id,
+        preferred_person_contact_id=strategy.person_contact_id,
+        fallback_channels=list(strategy.fallback_channels),
+        confidence=strategy.confidence,
+        rationale_codes=list(strategy.rationale_codes),
+        short_context=strategy.short_context,
+        warnings=list(strategy.warnings),
+        missing_information=list(strategy.missing_information),
+        evidence=_provenance_responses(rows, strategy.confidence),
+        scope=strategy.scope,
+        local_key=strategy.local_key,
+    )
+
+
+def _contactability_summary(lead) -> ContactabilitySummaryResponse:
+    strategy = lead.contact_strategy
+    assert strategy is not None
+    candidates = [item for item in lead.contactability.verified_websites if item.target_scope == strategy.scope and item.local_key == strategy.local_key]
+    status_priority = {"high_confidence": 0, "review_needed": 1, "ambiguous": 2, "rejected": 3}
+    site = sorted(candidates, key=lambda item: (status_priority.get(item.status, 99), -item.score, item.registrable_domain, item.id))[0] if candidates else None
+    web_warnings = list(site.attribution_warnings or ()) + list(site.rejection_reasons or ()) if site else []
+    if site and site.status == "rejected":
+        web_warnings.append("Site rejeté : il n'est pas présenté comme site officiel.")
+    reasons = [item.code for item in (*lead.scoring.positive_reasons, *lead.scoring.commercial_adjustments)]
+    return ContactabilitySummaryResponse(
+        scope=strategy.scope,
+        official_web=OfficialWebStatusResponse(
+            verified_site_status=site.status if site else None,
+            verified_domain=site.registrable_domain if site and site.status != "rejected" else None,
+            verification_score=(site.score if site and site.status != "rejected" else 0),
+            provider=site.provider if site else None,
+            warnings=list(dict.fromkeys(web_warnings)),
+        ),
+        recruitment_context=RecruitmentContextResponse(
+            active_offer_count=lead.active_offer_count,
+            representative_roles=list(lead.representative_job_titles),
+            newest_offer_date=lead.newest_offer_created_at,
+            primary_location=lead.principal_location,
+            employee_range=lead.employee_range,
+            employer_relationship_status=lead.scoring.employer_relationship_status,
+            scoring_reason_codes=reasons,
+        ),
+        warnings=list(strategy.warnings),
+    )
 
 
 class CommercialLeadListResponse(BaseModel):

@@ -130,9 +130,17 @@ def build_contact_strategy(
     The iterable-based API makes the business rules directly unit-testable and
     prevents this layer from coupling strategy calculation to persistence.
     """
-    people = tuple(sorted((item for item in person_contacts if item.is_active), key=_person_sort_key))
-    points = tuple(sorted((item for item in contact_points if item.is_active), key=_point_sort_key))
+    people = tuple(sorted((item for item in person_contacts if item.is_active and item.verification_status != VerificationStatus.REJECTED), key=_person_sort_key))
+    supplied_points = tuple(item for item in contact_points if item.is_active)
+    # A review-needed coordinate remains visible to callers, but is not silently
+    # promoted into a reliable recommended channel. Rejected data is never used.
+    withheld_points = tuple(item for item in supplied_points if item.verification_status in {
+        VerificationStatus.REJECTED, VerificationStatus.STALE
+    } or item.confidence_level in {ContactConfidence.REVIEW_NEEDED, ContactConfidence.AMBIGUOUS})
+    points = tuple(sorted((item for item in supplied_points if item not in withheld_points), key=_point_sort_key))
     warnings = list(target.warnings)
+    if withheld_points:
+        warnings.append("Certaines coordonnées sourcées exigent vérification et ne sont pas recommandées comme canal fiable.")
     if target.scope == ContactScope.LOCAL and target.local_key is None:
         warnings.append("Portée locale sans identifiant : recommandation non fiable.")
 
