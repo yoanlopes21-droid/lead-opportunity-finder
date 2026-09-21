@@ -131,7 +131,7 @@ def offer_description_website_seeds(
     return tuple(seeds.values())
 
 
-def official_web_provider(session: Session) -> OfficialWebProvider:
+def official_web_provider(session: Session, *, run_hard_cap: Optional[int] = None) -> OfficialWebProvider:
     """Build the provider with protected HTTP and budget-guarded optional Brave."""
     settings = get_settings()
     fetcher = SecureWebFetcher(
@@ -151,7 +151,8 @@ def official_web_provider(session: Session) -> OfficialWebProvider:
             api_key=settings.brave_search_api_key.get_secret_value(),
             base_url=settings.brave_search_api_url, timeout_seconds=settings.brave_search_timeout_seconds,
             requests_per_second=settings.brave_search_requests_per_second,
-            usage_service=BraveUsageService(session, policy), run_hard_cap=policy.default_run_hard_cap,
+            usage_service=BraveUsageService(session, policy),
+            run_hard_cap=(policy.default_run_hard_cap if run_hard_cap is None else run_hard_cap),
         )
     return OfficialWebProvider(
         repository=OfficialWebRepository(session), fetcher=fetcher, brave_client=brave_client,

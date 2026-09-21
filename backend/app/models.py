@@ -244,6 +244,7 @@ class Signal(TimestampedModel, Base):
 
 
 class SearchRun(TimestampedModel, Base):
+    """A user-requested commercial search, separate from source collection."""
     __tablename__ = "search_runs"
     id: Mapped[int] = mapped_column(primary_key=True)
     status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
@@ -254,6 +255,46 @@ class SearchRun(TimestampedModel, Base):
     companies_analyzed: Mapped[int] = mapped_column(Integer, default=0)
     opportunities_detected: Mapped[int] = mapped_column(Integer, default=0)
     qualified_leads: Mapped[int] = mapped_column(Integer, default=0)
+    # The original fields above remain for compatibility with the first local
+    # prototype.  These fields are the durable V1 orchestration contract.
+    department: Mapped[str] = mapped_column(String(3), default="94", index=True)
+    requested_actionable_leads: Mapped[int] = mapped_column(Integer, default=25)
+    current_actionable_leads: Mapped[int] = mapped_column(Integer, default=0)
+    candidates_considered: Mapped[int] = mapped_column(Integer, default=0)
+    candidates_enriched: Mapped[int] = mapped_column(Integer, default=0)
+    brave_requests_used: Mapped[int] = mapped_column(Integer, default=0)
+    brave_hard_cap: Mapped[int] = mapped_column(Integer, default=40)
+    stop_requested: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    error_summary: Mapped[Optional[str]] = mapped_column(String(1000))
+    configuration_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    configuration_fingerprint: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    current_company_key: Mapped[Optional[str]] = mapped_column(String(500))
+    current_step: Mapped[Optional[str]] = mapped_column(String(80))
+
+
+class SearchRunItem(Base):
+    """One company considered by a commercial search; terminal rows are never replayed."""
+
+    __tablename__ = "search_run_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("search_runs.id"), index=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    company_name_snapshot: Mapped[str] = mapped_column(String(500))
+    selection_position: Mapped[int] = mapped_column(Integer)
+    score_snapshot: Mapped[int] = mapped_column(Integer)
+    input_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    actionable: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    reused_cache: Mapped[bool] = mapped_column(Boolean, default=False)
+    brave_requests_used: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_error_type: Mapped[Optional[str]] = mapped_column(String(100))
+    last_error_message: Mapped[Optional[str]] = mapped_column(String(500))
+    __table_args__ = (
+        UniqueConstraint("run_id", "company_key", name="uq_search_run_item_company"),
+        UniqueConstraint("run_id", "selection_position", name="uq_search_run_item_position"),
+    )
 
 
 class LeadAssessment(TimestampedModel, Base):

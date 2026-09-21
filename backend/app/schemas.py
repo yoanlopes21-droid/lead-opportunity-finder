@@ -42,6 +42,35 @@ class FranceTravailAuthCheckResponse(BaseModel):
     message: str
 
 
+class SearchRunCreateRequest(BaseModel):
+    department: str = Field(default="94", min_length=1, max_length=3)
+    requested_actionable_leads: int = Field(default=25, ge=1, le=100)
+    brave_hard_cap: int = Field(default=40, ge=0, le=40)
+
+
+class SearchRunProgressResponse(BaseModel):
+    id: int
+    status: str
+    department: str
+    requested_actionable_leads: int
+    current_actionable_leads: int
+    candidates_considered: int
+    candidates_enriched: int
+    brave_requests_used: int
+    brave_hard_cap: int
+    current_company_key: Optional[str]
+    current_step: Optional[str]
+    created_at: datetime
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+    error_summary: Optional[str]
+
+
+class SearchRunResponse(SearchRunProgressResponse):
+    stop_requested: bool
+    configuration_fingerprint: Optional[str]
+
+
 class OpportunitySignalResponse(BaseModel):
     name: str
     active: bool

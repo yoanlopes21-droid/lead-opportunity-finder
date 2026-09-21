@@ -92,7 +92,9 @@ class BraveUsageService:
             monthly_used = self._used(period)
             if monthly_used >= self.policy.monthly_request_budget:
                 raise BraveBudgetExceeded("monthly_budget_exhausted")
-            cap = run_hard_cap or self.policy.default_run_hard_cap
+            # Zero is an intentional per-run opt-out, not a request to fall
+            # back to the default cap.
+            cap = self.policy.default_run_hard_cap if run_hard_cap is None else run_hard_cap
             if run_id is not None and self._used(period, run_id=run_id) >= cap:
                 raise BraveBudgetExceeded("run_budget_exhausted")
             event = BraveUsageEvent(

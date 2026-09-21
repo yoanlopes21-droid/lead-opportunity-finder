@@ -11,6 +11,8 @@ from app.database import Base, engine
 from app import models  # noqa: F401 - registers metadata
 from app.api.commercial_leads import router as commercial_leads_router
 from app.api.brave_usage import router as brave_usage_router
+from app.api.search_runs import router as search_runs_router
+from app.services.search_runs import ensure_search_run_schema
 from app.schemas import AppSummary, FranceTravailAuthCheckResponse, HealthResponse
 from app.services.france_travail.auth import FranceTravailAuthError, FranceTravailOAuthClient
 
@@ -21,6 +23,7 @@ settings = get_settings()
 async def lifespan(_: FastAPI):
     Path(settings.database_url.removeprefix("sqlite:///"),).parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    ensure_search_run_schema(engine)
     yield
 
 
@@ -34,6 +37,7 @@ app.add_middleware(
 )
 app.include_router(commercial_leads_router)
 app.include_router(brave_usage_router)
+app.include_router(search_runs_router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse, tags=["system"])
