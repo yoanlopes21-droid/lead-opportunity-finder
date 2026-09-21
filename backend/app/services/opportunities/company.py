@@ -47,6 +47,25 @@ class LocalOpportunity:
 
 
 @dataclass(frozen=True)
+class ActiveJobOffer:
+    """A compact, display-safe active offer; no source payload or description."""
+
+    offer_id: str
+    title: str
+    commune: Optional[str]
+    location_label: Optional[str]
+    display_location: Optional[str]
+    published_at: Optional[str]
+    updated_at: Optional[str]
+    contract_type: Optional[str]
+    salary: Optional[str]
+    source: str
+    source_url: Optional[str]
+    local_key: str
+    age_days: Optional[int]
+
+
+@dataclass(frozen=True)
 class CompanyOpportunity:
     company_key: str
     company_name: str
@@ -73,6 +92,7 @@ class CompanyOpportunity:
     average_offer_age_days: Optional[float]
     median_offer_age_days: Optional[float]
     signals: tuple[OpportunitySignal, ...]
+    active_job_offers: tuple[ActiveJobOffer, ...] = ()
     intermediary_description_evidence: IntermediaryDescriptionEvidence = field(
         default_factory=IntermediaryDescriptionEvidence
     )
@@ -199,9 +219,43 @@ def _build_opportunity(
         average_offer_age_days=round(sum(ages) / len(ages), 1) if ages else None,
         median_offer_age_days=round(float(median(ages)), 1) if ages else None,
         signals=signals,
+        active_job_offers=_active_job_offers(offers, department_code, observed_at),
         intermediary_description_evidence=intermediary_description_evidence,
         local_opportunities=local_opportunities,
     )
+
+
+def _active_job_offers(
+    offers: Sequence[ObservedJobOffer], department_code: str, observed_at: datetime,
+) -> tuple[ActiveJobOffer, ...]:
+    rows = []
+    for offer in offers:
+        published_at = _parse_datetime(offer.created_at)
+        local_key, _, _ = _local_bucket(offer, department_code)
+        commune = _clean_location_value(offer.commune)
+        location_label = _clean_location_value(offer.location_label)
+        rows.append((offer, published_at, ActiveJobOffer(
+            offer_id=offer.source_offer_id,
+            title=offer.title,
+            commune=commune,
+            location_label=location_label,
+            display_location=_display_location(commune, location_label),
+            published_at=_format_datetime(published_at),
+            updated_at=_format_datetime(_parse_datetime(offer.updated_at)),
+            contract_type=_clean_location_value(offer.contract_type),
+            salary=_usable_salary(offer.salary),
+            source=offer.source,
+            source_url=offer.source_url,
+            local_key=local_key,
+            age_days=(max(int((observed_at - published_at).total_seconds() / 86400), 0) if published_at else None),
+        )))
+    return tuple(item[2] for item in sorted(
+        rows,
+        key=lambda item: (
+            item[1] is None, -(item[1].timestamp()) if item[1] else 0,
+            item[0].title.casefold(), item[0].source.casefold(), item[0].source_offer_id,
+        ),
+    ))
 
 
 def _build_local_opportunities(
@@ -321,6 +375,27 @@ def _normalize_text_key(value: Optional[str]) -> Optional[str]:
 
 def _clean_location_value(value: Optional[str]) -> Optional[str]:
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _display_location(commune: Optional[str], location_label: Optional[str]) -> Optional[str]:
+    """Expose only a human location; commune codes remain internal join keys."""
+    for value in (commune, location_label):
+        cleaned = _clean_location_value(value)
+        if cleaned and not re.fullmatch(r"\d{5}", cleaned):
+            return cleaned
+    return None
+
+
+def _usable_salary(value: Optional[str]) -> Optional[str]:
+    cleaned = _clean_location_value(value)
+    if not cleaned:
+        return None
+    numbers = re.findall(r"\d+(?:[.,]\d+)?", cleaned.replace(" ", ""))
+    if not numbers:
+        return None
+    if all(float(number.replace(",", ".")) == 0 for number in numbers):
+        return None
+    return cleaned
 
 
 def _normalize_location_key(value: str) -> str:

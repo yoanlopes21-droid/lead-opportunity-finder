@@ -102,6 +102,7 @@ def lead(relationship=EmployerRelationshipStatus.DIRECT_EMPLOYER, siren="1234567
         company_key="acme", company_name="ACME SAS", official_name="ACME SAS" if siren else None,
         siren=siren, siret="12345678900010" if siren else None, entity_sector_type="private",
         employee_range="20-49", principal_location="Créteil", active_offer_count=2,
+        active_job_offers=(),
         distinct_job_title_count=1, representative_job_titles=("Technicien",),
         newest_offer_created_at=None, oldest_offer_created_at=None, local_opportunities=locals_,
         latent_signals=(), scoring=scoring, evidence=(), is_eligible=True,

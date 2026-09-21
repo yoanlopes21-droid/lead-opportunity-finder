@@ -40,7 +40,8 @@ def client(session):
 
 def add_offer(
     session, identifier, company, *, department="94", title="Technicien", age_days=2,
-    url=None, description=None, commune="94028", location_label="Créteil",
+    url=None, description=None, commune="94028", location_label="Créteil", contract_type=None,
+    salary=None, updated_at=None,
 ):
     session.add(ObservedJobOffer(
         source="france_travail",
@@ -52,6 +53,9 @@ def add_offer(
         commune=commune,
         department_code=department,
         created_at=(NOW - timedelta(days=age_days)).isoformat().replace("+00:00", "Z"),
+        updated_at=updated_at,
+        contract_type=contract_type,
+        salary=salary,
         source_url=url,
         first_seen_at=NOW - timedelta(days=age_days),
         last_seen_at=NOW,
@@ -215,6 +219,23 @@ def test_api_serializes_local_opportunities_without_copying_global_legal_identit
     assert local_opportunities[0]["source_offer_ids"] == ["france_travail:local-1"]
     assert local_opportunities[0]["source_urls"] == ["https://example.test/one"]
     assert not ({"siren", "siret", "official_name"} & set(local_opportunities[0]))
+
+
+def test_api_exposes_compact_active_job_offers_in_recent_deterministic_order(client, session):
+    add_offer(session, "older", "OFFERS", title="Conseiller clientèle", age_days=4, commune=None, location_label="Créteil", url=None, salary="Annuel de 0.0 Euros")
+    add_offer(session, "recent-b", "OFFERS", title="Business Developer", age_days=1, commune="94029", location_label="Vitry-sur-Seine", url="https://offers.test/b", contract_type="CDI", salary="35 000 €", updated_at="2026-09-16T12:00:00Z")
+    add_offer(session, "recent-a", "OFFERS", title="Assistant RH", age_days=1, commune="94028", location_label="Créteil", url="https://offers.test/a")
+    session.commit()
+
+    offers = client.get("/api/v1/commercial-leads").json()["items"][0]["active_job_offers"]
+    assert [item["offer_id"] for item in offers] == ["recent-a", "recent-b", "older"]
+    assert offers[0]["local_key"] == "commune:94:94028"
+    assert offers[1]["contract_type"] == "CDI" and offers[1]["salary"] == "35 000 €"
+    assert offers[1]["source_url"] == "https://offers.test/b" and offers[1]["updated_at"].endswith("Z")
+    assert offers[1]["display_location"] == "Vitry-sur-Seine"
+    assert offers[2]["commune"] is None and offers[2]["location_label"] == "Créteil"
+    assert offers[2]["display_location"] == "Créteil" and offers[2]["salary"] is None
+    assert "description" not in offers[0]
 
 
 def test_api_exposes_suspected_intermediary_evidence(client, session):

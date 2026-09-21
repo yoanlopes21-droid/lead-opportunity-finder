@@ -1,40 +1,51 @@
-import { useEffect, useState } from 'react'
-
-type Summary = {
-  app_name: string
-  territory: string
-  external_connectors_enabled: number
-  contact_automation_enabled: boolean
-}
+import { useCallback, useEffect, useState } from 'react'
+import { fetchCommercialLeads } from './api'
+import { BraveUsageWidget } from './components/BraveUsageWidget'
+import { LeadCard } from './components/LeadCard'
+import type { CommercialLeadPage } from './types'
 
 export default function App() {
-  const [summary, setSummary] = useState<Summary | null>(null)
-  const [apiOnline, setApiOnline] = useState(false)
+  const [page, setPage] = useState<CommercialLeadPage | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
 
-  useEffect(() => {
-    fetch('http://127.0.0.1:8000/api/v1/summary')
-      .then((response) => response.json())
-      .then((data: Summary) => { setSummary(data); setApiOnline(true) })
-      .catch(() => setApiOnline(false))
+  const loadPage = useCallback(async (offset: number) => {
+    setIsLoading(true); setError(null)
+    try { setPage(await fetchCommercialLeads(offset)) }
+    catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Impossible de joindre l’API locale.') }
+    finally { setIsLoading(false) }
   }, [])
 
+  useEffect(() => {
+    void loadPage(0)
+  }, [loadPage])
+
+  const rangeStart = page && page.total > 0 ? page.offset + 1 : 0
+  const rangeEnd = page ? Math.min(page.offset + page.items.length, page.total) : 0
+  const canGoPrevious = Boolean(page && page.offset > 0)
+  const canGoNext = Boolean(page && page.offset + page.items.length < page.total)
+
   return (
-    <main>
-      <header>
-        <p className="eyebrow">OUTIL LOCAL · QUALIFICATION DE LEADS</p>
-        <h1>Vos prochains recrutements commencent ici.</h1>
-        <p className="intro">Un espace local pour identifier et qualifier des opportunités commerciales dans le Val-de-Marne.</p>
+    <main className="dashboard">
+      <header className="page-header">
+        <p className="eyebrow">OUTIL LOCAL · OPPORTUNITÉS COMMERCIALES</p><h1>Lead Opportunity Finder</h1>
+        <p className="intro">Priorisez les opportunités commerciales locales à partir de besoins de recrutement observés.</p>
       </header>
-      <section className="status-card">
-        <div><span className={apiOnline ? 'dot online' : 'dot'} /> API locale {apiOnline ? 'connectée' : 'à démarrer'}</div>
-        <strong>{summary?.territory ?? 'Val-de-Marne (94)'}</strong>
+      <section className="summary-grid" aria-label="Résumé des leads">
+        <article><span>Leads prioritaires</span><strong>{page?.total ?? '—'}</strong><small>résultat de la recherche actuelle</small></article>
+        <article><span>Département</span><strong>94</strong><small>Val-de-Marne</small></article>
+        <article><span>Affichés</span><strong>{page?.items.length ?? '—'}</strong><small>sur cette page</small></article>
       </section>
-      <section className="grid">
-        <article><span>01</span><h2>Rechercher</h2><p>Les sources seront activées progressivement, en commençant par les données autorisées et traçables.</p></article>
-        <article><span>02</span><h2>Qualifier</h2><p>Chaque opportunité réunira des faits, leurs preuves, et une priorité clairement expliquée.</p></article>
-        <article><span>03</span><h2>Prospecter</h2><p>Le système recommandera un canal. Aucun message ou contact ne sera envoyé automatiquement.</p></article>
+      <BraveUsageWidget />
+      <section className="lead-section" aria-labelledby="lead-list-title"><div className="section-heading"><div><p className="eyebrow">LISTE PRIORISÉE</p><h2 id="lead-list-title">Opportunités à contacter</h2></div>
+        <button type="button" className="refresh-button" onClick={() => void loadPage(page?.offset ?? 0)} disabled={isLoading}>{isLoading && page ? 'Actualisation…' : 'Actualiser'}</button>
+      </div>
+        {isLoading && !page && <div className="state-card" role="status">Chargement des opportunités locales…</div>}
+        {error && <div className="state-card error-state" role="alert"><p>{error}</p><button type="button" onClick={() => void loadPage(page?.offset ?? 0)}>Réessayer</button></div>}
+        {page && !error && page.items.length === 0 && <div className="state-card"><h3>Aucun lead à afficher</h3><p>Aucune opportunité ne correspond à cette recherche pour le moment.</p></div>}
+        {page && !error && page.items.length > 0 && <div className="lead-list">{page.items.map((lead) => <LeadCard key={lead.company_key} lead={lead} />)}</div>}
       </section>
-      <section className="coming-soon"><h2>Socle prêt</h2><p>La recherche de leads, les connecteurs et les exports seront ajoutés dans les prochaines étapes.</p></section>
+      {page && !error && <nav className="pagination" aria-label="Pagination des leads"><button type="button" onClick={() => void loadPage(Math.max(0, page.offset - page.limit))} disabled={!canGoPrevious || isLoading}>Page précédente</button><p>{rangeStart}–{rangeEnd} sur {page.total}</p><button type="button" onClick={() => void loadPage(page.offset + page.limit)} disabled={!canGoNext || isLoading}>Page suivante</button></nav>}
     </main>
   )
 }

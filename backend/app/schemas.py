@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
@@ -85,6 +85,22 @@ class LocalOpportunityResponse(BaseModel):
     signals: list[OpportunitySignalResponse]
     contact_point_ids: list[int] = Field(default_factory=list)
     person_contact_ids: list[int] = Field(default_factory=list)
+
+
+class ActiveJobOfferResponse(BaseModel):
+    offer_id: str
+    title: str
+    commune: Optional[str]
+    location_label: Optional[str]
+    display_location: Optional[str]
+    published_at: Optional[str]
+    updated_at: Optional[str]
+    contract_type: Optional[str]
+    salary: Optional[str]
+    source: str
+    source_url: Optional[str]
+    local_key: str
+    age_days: Optional[int]
 
 
 class ContactProvenanceResponse(BaseModel):
@@ -208,6 +224,7 @@ class CommercialLeadResponse(BaseModel):
     department: str
     primary_location: Optional[str]
     active_offer_count: int
+    active_job_offers: list[ActiveJobOfferResponse]
     role_diversity: int
     representative_roles: list[str]
     newest_offer_date: Optional[str]
@@ -246,6 +263,7 @@ class CommercialLeadResponse(BaseModel):
             department=lead.scoring.department_code,
             primary_location=lead.principal_location,
             active_offer_count=lead.active_offer_count,
+            active_job_offers=[ActiveJobOfferResponse(**item.__dict__) for item in lead.active_job_offers],
             role_diversity=lead.distinct_job_title_count,
             representative_roles=list(lead.representative_job_titles),
             newest_offer_date=lead.newest_offer_created_at,
@@ -399,17 +417,19 @@ def _contactability_summary(lead) -> ContactabilitySummaryResponse:
     assert strategy is not None
     candidates = [item for item in lead.contactability.verified_websites if item.target_scope == strategy.scope and item.local_key == strategy.local_key]
     status_priority = {"high_confidence": 0, "review_needed": 1, "ambiguous": 2, "rejected": 3}
-    site = sorted(candidates, key=lambda item: (status_priority.get(item.status, 99), -item.score, item.registrable_domain, item.id))[0] if candidates else None
+    presentable = [item for item in candidates if _is_presentable_official_site(item, lead.company_key)]
+    site = sorted(presentable, key=lambda item: (status_priority.get(item.status, 99), -item.score, item.registrable_domain, item.id))[0] if presentable else None
+    hidden_candidates = [item for item in candidates if item not in presentable]
     web_warnings = list(site.attribution_warnings or ()) + list(site.rejection_reasons or ()) if site else []
-    if site and site.status == "rejected":
-        web_warnings.append("Site rejeté : il n'est pas présenté comme site officiel.")
+    if hidden_candidates:
+        web_warnings.append("Aucun site officiel n'a pu être vérifié avec suffisamment de confiance.")
     reasons = [item.code for item in (*lead.scoring.positive_reasons, *lead.scoring.commercial_adjustments)]
     return ContactabilitySummaryResponse(
         scope=strategy.scope,
         official_web=OfficialWebStatusResponse(
-            verified_site_status=site.status if site else None,
-            verified_domain=site.registrable_domain if site and site.status != "rejected" else None,
-            verification_score=(site.score if site and site.status != "rejected" else 0),
+            verified_site_status=site.status if site else ("rejected" if hidden_candidates else None),
+            verified_domain=site.registrable_domain if site else None,
+            verification_score=(site.score if site else 0),
             provider=site.provider if site else None,
             warnings=list(dict.fromkeys(web_warnings)),
         ),
@@ -424,6 +444,31 @@ def _contactability_summary(lead) -> ContactabilitySummaryResponse:
         ),
         warnings=list(strategy.warnings),
     )
+
+
+_THIRD_PARTY_SUMMARY_REASONS = frozenset({
+    "competing_domains", "third_party_commercial_aggregator", "third_party_directory",
+})
+_THIRD_PARTY_SUMMARY_DOMAINS = frozenset({"lefigaro.fr", "wikidata.org"})
+
+
+def _is_presentable_official_site(site, company_key: str) -> bool:
+    """Keep historic and third-party hypotheses auditable but out of the UI summary."""
+    fresh_until = site.fresh_until
+    if fresh_until.tzinfo is None:
+        fresh_until = fresh_until.replace(tzinfo=timezone.utc)
+    if fresh_until < datetime.now(timezone.utc) or site.status == "rejected":
+        return False
+    reasons = {str(value).casefold() for value in (*site.rejection_reasons, *site.attribution_warnings)}
+    if reasons & _THIRD_PARTY_SUMMARY_REASONS:
+        return False
+    if site.registrable_domain.casefold() in _THIRD_PARTY_SUMMARY_DOMAINS:
+        return False
+    if site.status in {"review_needed", "ambiguous"}:
+        domain = "".join(character for character in site.registrable_domain.casefold() if character.isalnum())
+        tokens = [token for token in company_key.casefold().split() if len(token) >= 5]
+        return any(token in domain for token in tokens)
+    return True
 
 
 class CommercialLeadListResponse(BaseModel):

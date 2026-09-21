@@ -184,6 +184,34 @@ def test_intermediary_stays_intermediary_and_official_web_rejection_is_safe(clie
     assert website["verification_score"] == 0 and website["verified_domain"] is None
 
 
+def test_site_summary_hides_stale_and_obvious_third_party_hypotheses(client, session):
+    offer(session, "press", "PRESS")
+    offer(session, "structured", "STRUCTURED")
+    offer(session, "plausible", "PLAUSIBLE")
+    records = [
+        ("press", "lefigaro.fr", WebsiteVerificationStatus.AMBIGUOUS, NOW + timedelta(days=30), ["competing_domains"]),
+        ("structured", "wikidata.org", WebsiteVerificationStatus.REVIEW_NEEDED, NOW + timedelta(days=30), []),
+        ("plausible", "plausible.test", WebsiteVerificationStatus.AMBIGUOUS, NOW + timedelta(days=30), []),
+    ]
+    for key, domain, status, fresh_until, warnings in records:
+        session.add(VerifiedWebsiteRecord(
+            company_key=key, target_scope=ContactScope.COMPANY, local_key=None,
+            target_fingerprint=f"target-{key}", candidate_fingerprint=f"candidate-{key}", candidate_set_fingerprint=f"set-{key}",
+            provider="official_web", canonical_url=f"https://{domain}", registrable_domain=domain,
+            status=status, score=70, rejection_reasons=[], attribution_warnings=warnings,
+            observed_at=NOW, verified_at=NOW, fresh_until=fresh_until, fingerprint=f"site-{key}",
+        ))
+    session.commit()
+
+    for name in ("PRESS", "STRUCTURED"):
+        website = item_for(client, name)["contactability_summary"]["official_web"]
+        assert website["verified_site_status"] == "rejected"
+        assert website["verified_domain"] is None and website["verification_score"] == 0
+    visible = item_for(client, "PLAUSIBLE")["contactability_summary"]["official_web"]
+    assert visible["verified_site_status"] == "ambiguous"
+    assert visible["verified_domain"] == "plausible.test"
+
+
 def test_contactability_loader_uses_bounded_selects_for_many_leads(client, session):
     for index in range(24):
         key = f"many-{index}"

@@ -26,6 +26,7 @@ from app.services.commercial_leads.exclusions import (
 )
 from app.services.company_enrichment.contracts import MatchStatus
 from app.services.opportunities.company import (
+    ActiveJobOffer,
     CompanyOpportunity,
     LocalOpportunity,
     OpportunitySignal,
@@ -74,6 +75,7 @@ class CommercialLead:
     employee_range: Optional[str]
     principal_location: Optional[str]
     active_offer_count: int
+    active_job_offers: tuple[ActiveJobOffer, ...]
     distinct_job_title_count: int
     representative_job_titles: tuple[str, ...]
     newest_offer_created_at: Optional[str]
@@ -180,6 +182,7 @@ def _build_lead(
         employee_range=enrichment.employee_range if is_high_confidence else None,
         principal_location=_principal_location(opportunity, enrichment, is_high_confidence),
         active_offer_count=opportunity.active_offer_count,
+        active_job_offers=opportunity.active_job_offers,
         distinct_job_title_count=opportunity.distinct_job_title_count,
         representative_job_titles=opportunity.job_titles,
         newest_offer_created_at=opportunity.newest_offer_created_at,

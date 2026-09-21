@@ -45,6 +45,14 @@ lead, des champs de lecture seule :
   alternatives, confiance, avertissements, informations manquantes et preuves) ;
 - `contactability_summary` : statut compact du site officiel et contexte de
   recrutement utilisable avant prise de contact.
+- `active_job_offers` : offres actives compactes de chaque lead de la page,
+  triées par publication décroissante puis de manière déterministe. Elles ne
+  contiennent ni description complète ni payload source ; elles sont composées
+  à partir de la lecture déjà nécessaire à l'agrégation, sans requête par lead.
+
+La réponse conserve les offres actives complètes pour la page demandée afin que
+l'interface locale puisse les dévoiler à la demande. L'interface n'en affiche
+que quelques-unes par défaut ; l'API reste paginée au niveau des leads.
 
 Les coordonnées locales restent liées à leur `local_key`; elles sont également
 référencées dans la sous-opportunité correspondante via `contact_point_ids` et
