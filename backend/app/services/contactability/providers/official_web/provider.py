@@ -38,8 +38,8 @@ from app.services.contactability.providers.official_web.verification import (
 
 PROVIDER_NAME = "official_web"
 DISCOVERY_POLICY_VERSION = 2
-VERIFICATION_POLICY_VERSION = 2
-EXTRACTION_POLICY_VERSION = 1
+VERIFICATION_POLICY_VERSION = 3
+EXTRACTION_POLICY_VERSION = 2
 
 
 class OfficialWebProvider:

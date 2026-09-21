@@ -16,6 +16,7 @@ from app.services.contactability.normalization import (
     normalize_contact_value, normalize_generic, normalize_person_name,
 )
 from app.services.contactability.providers.official_web.contracts import VerifiedOfficialSite
+from app.services.contactability.providers.official_web.contracts import WebsiteVerificationStatus
 from app.services.contactability.providers.official_web.discovery import registrable_domain
 from app.services.contactability.providers.official_web.fetcher import SecureFetchError
 
@@ -30,6 +31,14 @@ _ORGANIZATION_NAME_MARKERS = {
     "association", "company", "direction", "groupe", "legal", "legales", "mentions",
     "sarl", "sas", "sasu", "sau", "sa", "scop", "societe", "specific", "specifiques",
 }
+_PERSON_NAME_FORBIDDEN_TOKENS = {
+    "accueil", "aller", "blog", "client", "contact", "contactez", "espace",
+    "nous", "prendre", "rendez", "services", "tout", "vous",
+}
+_PERSON_TITLE_NAVIGATION_MARKERS = (
+    "accueil", "blog", "contact", "espace client", "prendre un rendez",
+    "prendre rendez", "mentions legales", "mentions légales",
+)
 _EMAIL = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
 _PHONE = re.compile(r"(?<!\w)(?:\+33\s?\(?0?\)?|0)[1-9](?:[ .-]?\d{2}){4}(?!\w)")
 _PERSON_AFTER = re.compile(r"\b([A-ZÀ-ÖØ-Þ][\w'’-]+(?:\s+[A-ZÀ-ÖØ-Þ][\w'’-]+){1,3})\s*(?:[-–—,:|]|est)\s*([^.;]{3,100})", re.UNICODE)
@@ -84,6 +93,10 @@ def extract_official_contacts(
 def _one_site_per_domain(sites):
     seen, result = set(), []
     for site in sites:
+        # This is intentionally duplicated with the repository query: direct
+        # callers of the extractor must not be able to bypass verification.
+        if site.status != WebsiteVerificationStatus.HIGH_CONFIDENCE:
+            continue
         if site.registrable_domain not in seen:
             seen.add(site.registrable_domain)
             result.append(site)
@@ -136,7 +149,7 @@ def _people_from_page(target, url, text, observed_at):
     for name, title in pairs:
         role = _role(title)
         normalized = normalize_person_name(name)
-        if role is None or not _looks_like_person_name(normalized, target):
+        if role is None or not _looks_like_person_name(name, target) or not _looks_like_person_title(title):
             continue
         excerpt = _excerpt(text, name)
         evidence = ContactEvidenceCandidate(
@@ -191,14 +204,27 @@ def _is_person_source_url(url):
 
 
 def _looks_like_person_name(value, target):
-    parts = value.split()
+    parts = value.strip().split()
     if not 2 <= len(parts) <= 4 or any(len(part) < 2 or len(part) > 40 for part in parts):
         return False
-    if any(part in _ORGANIZATION_NAME_MARKERS for part in parts):
+    # The role-before regex is case-insensitive for role matching, so validate
+    # the captured surface form here.  This rejects navigation/text fragments
+    # such as "nous Nous apportons" before normalisation erases that signal.
+    if any(not re.fullmatch(r"[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'’-]{1,39}", part) for part in parts):
+        return False
+    normalized_parts = [part.casefold() for part in parts]
+    if any(part in _ORGANIZATION_NAME_MARKERS or part in _PERSON_NAME_FORBIDDEN_TOKENS for part in normalized_parts):
         return False
     organization = normalize_person_name(target.organization_name_snapshot) or ""
     organization_parts = [part for part in organization.split() if len(part) >= 3]
-    return not (len(organization_parts) >= 2 and all(part in parts for part in organization_parts))
+    return not (len(organization_parts) >= 2 and all(part in normalized_parts for part in organization_parts))
+
+
+def _looks_like_person_title(value):
+    normalized = normalize_generic(value) or ""
+    if not normalized or len(normalized.split()) > 12:
+        return False
+    return not any(marker in normalized for marker in _PERSON_TITLE_NAVIGATION_MARKERS)
 
 
 def _dedupe_points(items): return tuple({(x.contact_type, x.normalized_value, x.scope, x.local_key): x for x in items if x}.values())

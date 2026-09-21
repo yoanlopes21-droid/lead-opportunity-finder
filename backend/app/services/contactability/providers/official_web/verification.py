@@ -35,6 +35,12 @@ _THIRD_PARTY_PROFILE_MARKERS = (
     "informations legales", "informations légales", "entreprises similaires",
     "rechercher une entreprise", "score de solvabilite", "score de solvabilité",
 )
+_THIRD_PARTY_COMMERCIAL_MARKERS = (
+    "comparateur", "comparatif", "comparaison", "comparez", "meilleur prix",
+    "bons plans", "bon plan", "promotions", "guide", "portail", "editorial", "éditorial",
+    "marketplace", "place de marche", "agrégateur", "agregateur",
+    "annuaire spécialisé", "annuaire specialise",
+)
 _PROFILE_PATH_MARKERS = ("/societe/", "/entreprise/", "/company/", "/fiche/")
 _OPERATOR_PATTERN = re.compile(
     r"(?is)(?:editeur|éditeur|exploite par|exploité par|propulse par|propulsé par)\s*[:\-]?\s*([^.;]{2,120})"
@@ -264,13 +270,10 @@ def _domain_brand_matches(target: ContactTarget, domain: str) -> bool:
             token for token in re.findall(r"[a-z0-9]+", normalized)
             if token not in _LEGAL_SUFFIXES
         )
+        # A whole distinctive brand in the registrable-domain label is a useful
+        # ownership clue.  A lone word is not: a travel comparator containing
+        # "voyages", for example, is about a brand but is not operated by it.
         if len(compact) >= 4 and (compact == compact_domain or compact in compact_domain):
-            return True
-        if any(
-            len(token) >= 4 and token in compact_domain
-            for token in re.findall(r"[a-z0-9]+", normalized)
-            if token not in _LEGAL_SUFFIXES
-        ):
             return True
     return False
 
@@ -297,6 +300,16 @@ def _third_party_reason(target, candidate, pages) -> Optional[str]:
     operator_is_target = bool(operator and _target_identity_matches(target, normalize_generic(operator.group(1)) or ""))
     if operator and not operator_is_target:
         return "third_party_directory" if looks_like_directory or path_is_profile else "third_party_profile"
+    # Commercial/editorial sites can repeat a brand throughout a dedicated
+    # page.  Unless their legal operator is the target, that proves subject
+    # matter only, never ownership of the domain.
+    domain_text = normalize_generic(candidate.registrable_domain) or ""
+    commercial_portal = any(
+        marker in combined or marker in domain_text
+        for marker in _THIRD_PARTY_COMMERCIAL_MARKERS
+    )
+    if commercial_portal and not operator_is_target and not _domain_brand_matches(target, candidate.registrable_domain):
+        return "third_party_commercial_aggregator"
     if (looks_like_directory or path_is_profile) and not _domain_brand_matches(target, candidate.registrable_domain):
         return "third_party_directory" if looks_like_directory else "third_party_profile"
     return ""

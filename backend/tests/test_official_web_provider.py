@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.models import ContactEvidence, ContactPoint, ContactProviderState, VerifiedWebsiteRecord, WebsiteCandidateRecord
+from app.models import ContactEvidence, ContactPoint, ContactProviderState, PersonContact, VerifiedWebsiteRecord, WebsiteCandidateRecord
 from app.services.contactability.batch import ContactBatchPolicy, ContactEnrichmentBatchOrchestrator
 from app.services.contactability.contracts import ContactProviderStatus, ContactScope, ContactTarget
 from app.services.contactability.providers.official_web.brave_client import BraveSearchClient
@@ -25,7 +25,9 @@ from app.services.contactability.providers.official_web.discovery import (
 )
 from app.services.contactability.providers.official_web.fetcher import SecureFetchError, SecureWebFetcher
 from app.services.contactability.providers.official_web.extraction import extract_official_contacts
-from app.services.contactability.providers.official_web.persistence import OfficialWebRepository, ensure_official_web_schema
+from app.services.contactability.providers.official_web.persistence import (
+    OfficialWebRepository, ensure_official_web_schema, reject_official_web_domain,
+)
 from app.services.contactability.providers.official_web.provider import (
     OfficialWebProvider,
     official_web_target_fingerprint,
@@ -301,9 +303,13 @@ def _candidate(item=None, url="https://acme.fr"):
 def test_exact_siren_is_strong_and_conflict_rejects():
     item = target()
     candidate = _candidate(item)
-    good_fetcher = PageFetcher({"https://acme.fr/": page(
-        "https://acme.fr/", "ACME INDUSTRIE SAS - SIREN 123 456 789 - Créteil"
-    )})
+    legal = "https://acme.fr/mentions-legales"
+    good_fetcher = PageFetcher({
+        "https://acme.fr/": page(
+            "https://acme.fr/", "ACME INDUSTRIE SAS - SIREN 123 456 789 - Créteil", (legal,),
+        ),
+        legal: page(legal, "Éditeur : ACME INDUSTRIE SAS."),
+    })
     good = verify_website_candidates(item, (candidate,), fetcher=good_fetcher, verified_at=NOW)[0]
     assert good.status == WebsiteVerificationStatus.HIGH_CONFIDENCE
     assert any(signal.signal_type == "siren_exact" and signal.weight == 70 for signal in good.signals)
@@ -361,6 +367,36 @@ def test_brand_domain_and_coherent_legal_operator_can_be_high_confidence():
     assert any(signal.signal_type == "legal_operator_target" for signal in result.signals)
 
 
+def test_comparator_repeating_a_brand_is_rejected_not_official():
+    item = target(siren=None, organization_name_snapshot="LECLERC VOYAGES", display_name_snapshot="Leclerc Voyages")
+    candidate = _candidate(item, "https://comparateurdevoyages.example/leclerc-voyages")
+    fetcher = PageFetcher({
+        candidate.canonical_url: page(
+            candidate.canonical_url,
+            "Leclerc Voyages : comparateur de voyages, comparez les prix et les offres.",
+        ),
+    })
+    result = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)[0]
+    assert result.status == WebsiteVerificationStatus.REJECTED
+    assert result.score == 0
+    assert "third_party_commercial_aggregator" in result.rejection_reasons
+
+
+def test_editorial_portal_dedicated_to_a_brand_is_rejected():
+    item = target(siren=None, organization_name_snapshot="ACME INDUSTRIE", display_name_snapshot="Acme Industrie")
+    candidate = _candidate(item, "https://guide-pratique.example/acme")
+    fetcher = PageFetcher({
+        candidate.canonical_url: page(
+            candidate.canonical_url,
+            "Guide pratique : tout savoir sur Acme Industrie et ses produits.",
+        ),
+    })
+    result = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)[0]
+    assert result.status == WebsiteVerificationStatus.REJECTED
+    assert result.score == 0
+    assert "third_party_commercial_aggregator" in result.rejection_reasons
+
+
 def test_discovery_uses_brand_and_context_not_siren_as_primary_query():
     item = target(siren="123456789", is_multi_local=True)
     first, fallback = discovery_queries(item)
@@ -391,9 +427,11 @@ def test_initial_dns_failure_is_a_retryable_resource_error_not_a_rejected_websit
     assert state.last_status == ContactProviderStatus.ERROR and state.fresh_until is None
     assert session.scalars(select(VerifiedWebsiteRecord)).all() == []
 
-    recovered_fetcher = PageFetcher({"https://acme.fr/": page(
-        "https://acme.fr/", "ACME INDUSTRIE SAS SIREN 123456789",
-    )})
+    legal = "https://acme.fr/mentions-legales"
+    recovered_fetcher = PageFetcher({
+        "https://acme.fr/": page("https://acme.fr/", "ACME INDUSTRIE SAS SIREN 123456789", (legal,)),
+        legal: page(legal, "Éditeur : ACME INDUSTRIE SAS."),
+    })
     recovered_provider = OfficialWebProvider(
         repository=OfficialWebRepository(session), fetcher=recovered_fetcher,
         seed_loader=lambda _: (seed,), now=lambda: NOW,
@@ -503,7 +541,7 @@ def test_verification_policy_version_invalidates_an_ambiguous_cache(session, mon
         fresh_until=NOW.replace(year=2027), attempt_count=1, result_count=1,
     ))
     session.commit()
-    monkeypatch.setattr(provider_module, "VERIFICATION_POLICY_VERSION", 3)
+    monkeypatch.setattr(provider_module, "VERIFICATION_POLICY_VERSION", 4)
     new_fingerprint = provider.resource_input_fingerprint(item, "verification")
     assert new_fingerprint != old_fingerprint
     assert session.scalar(select(ContactProviderState).where(
@@ -523,7 +561,7 @@ def test_extraction_fingerprint_depends_on_verified_domains_and_policy(session, 
     repo.persist_verified(verified, high_ttl=timedelta(days=90), review_ttl=timedelta(days=30))
     provider = OfficialWebProvider(repository=repo, fetcher=PageFetcher({}), now=lambda: NOW)
     old_fingerprint = provider.resource_input_fingerprint(item, "extraction")
-    monkeypatch.setattr(provider_module, "VERIFICATION_POLICY_VERSION", 3)
+    monkeypatch.setattr(provider_module, "VERIFICATION_POLICY_VERSION", 4)
     assert provider.resource_input_fingerprint(item, "extraction") != old_fingerprint
 
 
@@ -539,6 +577,50 @@ def test_schema_normalizes_historic_rejected_score_to_zero(session):
     session.commit()
     ensure_official_web_schema(session.bind)
     assert session.get(VerifiedWebsiteRecord, record.id).score == 0
+
+
+def test_rejecting_a_domain_removes_only_its_contacts_and_keeps_unrelated_phone(session):
+    item = target()
+    accepted = VerifiedWebsiteRecord(
+        company_key=item.company_key, target_scope=item.scope, local_key=None,
+        target_fingerprint="target", candidate_fingerprint="candidate", candidate_set_fingerprint="set",
+        provider="official_web", canonical_url="https://comparator.example/acme", registrable_domain="comparator.example",
+        status=WebsiteVerificationStatus.HIGH_CONFIDENCE, score=85, rejection_reasons=[], attribution_warnings=[],
+        observed_at=NOW, verified_at=NOW, fresh_until=NOW, fingerprint="comparator-record",
+    )
+    bad_point = ContactPoint(
+        company_key=item.company_key, scope=item.scope, local_key=None, siren=item.siren,
+        organization_name_snapshot=item.organization_name_snapshot, local_commune_snapshot=None,
+        local_location_label_snapshot=None, contact_type="website", value="https://comparator.example/acme",
+        normalized_value="https://comparator.example/acme", confidence_level="high_confidence",
+        verification_status="source_verified", attribution_reason="test", fingerprint="bad-point",
+        first_observed_at=NOW, last_observed_at=NOW, is_active=True,
+    )
+    good_phone = ContactPoint(
+        company_key=item.company_key, scope=item.scope, local_key=None, siren=item.siren,
+        organization_name_snapshot=item.organization_name_snapshot, local_commune_snapshot=None,
+        local_location_label_snapshot=None, contact_type="phone", value="01 23 45 67 89",
+        normalized_value="0123456789", confidence_level="high_confidence",
+        verification_status="source_verified", attribution_reason="test", fingerprint="good-phone",
+        first_observed_at=NOW, last_observed_at=NOW, is_active=True,
+    )
+    session.add_all([accepted, bad_point, good_phone])
+    session.flush()
+    session.add(ContactEvidence(
+        provider="official_web", source_name="Official website", source_url="https://comparator.example/acme",
+        observed_at=NOW, evidence_reason="test", excerpt=None, contact_point_id=bad_point.id, person_contact_id=None,
+        fingerprint="bad-evidence",
+    ))
+    session.commit()
+    result = reject_official_web_domain(
+        session, target_fingerprint="target", company_key=item.company_key, target_scope=item.scope,
+        local_key=None, domain="comparator.example", reason="third_party_commercial_aggregator",
+    )
+    assert result["contact_points"] == 1
+    assert session.get(ContactPoint, bad_point.id) is None
+    assert session.get(ContactPoint, good_phone.id) is not None
+    corrected = session.get(VerifiedWebsiteRecord, accepted.id)
+    assert corrected.status == WebsiteVerificationStatus.REJECTED and corrected.score == 0
 
 
 def test_batch_persists_artifacts_and_caches_resources_independently(session):
@@ -589,9 +671,11 @@ def test_extraction_keeps_public_contacts_people_and_minimal_evidence(session):
     item = target()
     candidate = _candidate(item)
     contact_url = "https://acme.fr/contact"
+    legal_url = "https://acme.fr/mentions-legales"
     fetcher = PageFetcher({
-        "https://acme.fr/": page("https://acme.fr/", "ACME INDUSTRIE SAS SIREN 123456789", (contact_url,)),
+        "https://acme.fr/": page("https://acme.fr/", "ACME INDUSTRIE SAS SIREN 123456789", (contact_url, legal_url)),
         contact_url: page(contact_url, "ACME INDUSTRIE SAS Contact contact@acme.fr 01 23 45 67 89 Alice Martin - Directrice des ressources humaines"),
+        legal_url: page(legal_url, "Éditeur : ACME INDUSTRIE SAS."),
     })
     verified = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)
     class AllowRobots:
@@ -604,6 +688,41 @@ def test_extraction_keeps_public_contacts_people_and_minimal_evidence(session):
     assert all(point.confidence_level == "high_confidence" for point in points)
     assert all(point.verification_status == "source_verified" for point in points)
     assert all(evidence.source_url and len(evidence.excerpt or "") <= 500 for point in points for evidence in point.evidence)
+
+
+@pytest.mark.parametrize("status", [
+    WebsiteVerificationStatus.REVIEW_NEEDED,
+    WebsiteVerificationStatus.AMBIGUOUS,
+    WebsiteVerificationStatus.REJECTED,
+])
+def test_extraction_never_accepts_non_high_confidence_sites(status):
+    item = target()
+    candidate = _candidate(item)
+    verified = verify_website_candidates(item, (candidate,), fetcher=PageFetcher({
+        candidate.canonical_url: page(candidate.canonical_url, "ACME INDUSTRIE SAS SIREN 123456789"),
+    }), verified_at=NOW)
+    blocked = (replace(verified[0], status=status),)
+    points, people, calls, _ = extract_official_contacts(
+        item, blocked, fetcher=PageFetcher({}), observed_at=NOW,
+    )
+    assert points == people == () and calls == 0
+
+
+def test_person_extraction_rejects_navigation_fragments_but_keeps_a_real_named_role():
+    item = target()
+    candidate = _candidate(item)
+    contact_url = "https://acme.fr/contact"
+    legal_url = "https://acme.fr/mentions-legales"
+    fetcher = PageFetcher({
+        candidate.canonical_url: page(candidate.canonical_url, "ACME INDUSTRIE SAS SIREN 123456789", (contact_url, legal_url)),
+        contact_url: page(contact_url, "nous Nous apportons tout - Recrutement Blog Contact Espace client Accueil. Alice Martin - Responsable recrutement"),
+        legal_url: page(legal_url, "Éditeur : ACME INDUSTRIE SAS."),
+    })
+    verified = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)
+    class AllowRobots:
+        def allowed(self, url, user_agent): return True
+    _, people, _, _ = extract_official_contacts(item, verified, fetcher=fetcher, observed_at=NOW, robots_policy=AllowRobots())
+    assert [(person.full_name, person.relevance_role) for person in people] == [("Alice Martin", "recruitment")]
 
 
 def test_person_extraction_skips_legal_pages_and_organization_like_names():

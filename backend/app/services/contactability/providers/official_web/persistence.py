@@ -98,6 +98,79 @@ def invalidate_official_web_domain(
     }
 
 
+def remove_official_web_domain_contacts(
+    session: Session, *, company_key: str, target_scope: str,
+    local_key: Optional[str], domain: str,
+) -> dict[str, int]:
+    """Delete only contact facts whose official-web evidence came from *domain*.
+
+    Candidate and verification audit records are intentionally untouched.  A
+    contact or person with another remaining evidence is retained.
+    """
+    evidence = []
+    for item in session.scalars(select(ContactEvidence).where(ContactEvidence.provider == "official_web")):
+        if registrable_domain(item.source_url or "") != domain:
+            continue
+        point = session.get(ContactPoint, item.contact_point_id) if item.contact_point_id else None
+        person = session.get(PersonContact, item.person_contact_id) if item.person_contact_id else None
+        artifact = point or person
+        if artifact and (
+            artifact.company_key == company_key
+            and artifact.scope == target_scope
+            and artifact.local_key == local_key
+        ):
+            evidence.append(item)
+    point_ids = {item.contact_point_id for item in evidence if item.contact_point_id is not None}
+    person_ids = {item.person_contact_id for item in evidence if item.person_contact_id is not None}
+    for item in evidence:
+        session.delete(item)
+    session.flush()
+    deleted_points = 0
+    for point_id in point_ids:
+        if session.scalar(select(ContactEvidence.id).where(ContactEvidence.contact_point_id == point_id)) is None:
+            session.delete(session.get(ContactPoint, point_id))
+            deleted_points += 1
+    deleted_people = 0
+    for person_id in person_ids:
+        if session.scalar(select(ContactEvidence.id).where(ContactEvidence.person_contact_id == person_id)) is None:
+            session.delete(session.get(PersonContact, person_id))
+            deleted_people += 1
+    session.flush()
+    return {
+        "evidence": len(evidence), "contact_points": deleted_points,
+        "person_contacts": deleted_people,
+    }
+
+
+def reject_official_web_domain(
+    session: Session, *, target_fingerprint: str, company_key: str, target_scope: str,
+    local_key: Optional[str], domain: str, reason: str,
+) -> dict[str, int]:
+    """Mark an accepted domain rejected and remove only its derived contacts."""
+    verified = tuple(session.scalars(select(VerifiedWebsiteRecord).where(
+        VerifiedWebsiteRecord.target_fingerprint == target_fingerprint,
+        VerifiedWebsiteRecord.registrable_domain == domain,
+    )))
+    for record in verified:
+        record.status = WebsiteVerificationStatus.REJECTED
+        record.score = 0
+        record.rejection_reasons = list(dict.fromkeys([*(record.rejection_reasons or ()), reason]))
+    artifacts = remove_official_web_domain_contacts(
+        session, company_key=company_key, target_scope=target_scope,
+        local_key=local_key, domain=domain,
+    )
+    states = tuple(session.scalars(select(ContactProviderState).where(
+        ContactProviderState.company_key == company_key,
+        ContactProviderState.target_scope == target_scope,
+        ContactProviderState.local_key == local_key,
+        ContactProviderState.resource.in_(("verification", "extraction")),
+    )))
+    for state in states:
+        session.delete(state)
+    session.flush()
+    return {"verified": len(verified), "states": len(states), **artifacts}
+
+
 class OfficialWebRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -199,10 +272,7 @@ class OfficialWebRepository:
     def verified_sites_for_extraction(self, target_fingerprint: str) -> tuple[VerifiedOfficialSite, ...]:
         records = self.session.scalars(select(VerifiedWebsiteRecord).where(
             VerifiedWebsiteRecord.target_fingerprint == target_fingerprint,
-            VerifiedWebsiteRecord.status.in_((
-                WebsiteVerificationStatus.HIGH_CONFIDENCE,
-                WebsiteVerificationStatus.REVIEW_NEEDED,
-            )),
+            VerifiedWebsiteRecord.status == WebsiteVerificationStatus.HIGH_CONFIDENCE,
         ).order_by(VerifiedWebsiteRecord.score.desc(), VerifiedWebsiteRecord.canonical_url)).all()
         return tuple(_verified_from_record(item) for item in records)
 
