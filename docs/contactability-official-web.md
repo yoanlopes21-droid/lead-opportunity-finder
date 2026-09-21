@@ -40,6 +40,20 @@ conservatively. HTTP responses, including 429 and 5xx, are counted.
 database contains only canonical candidate URLs, short search metadata,
 verification outcomes, and minimal explainable signals.
 
+## Cache-policy versions and scores
+
+Discovery, verification and extraction include explicit policy versions in their
+resource fingerprints. A policy change naturally makes only the corresponding
+resource state stale; candidates and verification records remain historical
+audit artifacts until a later run replaces them. Extraction also depends on the
+verification policy version and the currently verified domains.
+
+`VerifiedOfficialSite.score` is usable official-site confidence, not a raw sum
+of identity clues. A `rejected` result always has score `0`; its persisted
+signals retain the explainable evidence that led to rejection. UI/API consumers
+must use status together with this score, never treat a rejected record as a
+high-confidence website.
+
 ## Optional Brave configuration
 
 Set `LEAD_FINDER_BRAVE_SEARCH_API_KEY` only when Brave discovery is explicitly

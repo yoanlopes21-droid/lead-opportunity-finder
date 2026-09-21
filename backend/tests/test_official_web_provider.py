@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 
 import pytest
@@ -25,11 +25,12 @@ from app.services.contactability.providers.official_web.discovery import (
 )
 from app.services.contactability.providers.official_web.fetcher import SecureFetchError, SecureWebFetcher
 from app.services.contactability.providers.official_web.extraction import extract_official_contacts
-from app.services.contactability.providers.official_web.persistence import OfficialWebRepository
+from app.services.contactability.providers.official_web.persistence import OfficialWebRepository, ensure_official_web_schema
 from app.services.contactability.providers.official_web.provider import (
     OfficialWebProvider,
     official_web_target_fingerprint,
 )
+from app.services.contactability.providers.official_web import provider as provider_module
 from app.services.contactability.providers.official_web.verification import verify_website_candidates
 from app.services.contactability.providers.official_web.robots import RobotsTxtPolicy
 from app.services.brave_usage import BraveBudgetPolicy, BraveUsageService
@@ -143,6 +144,40 @@ def test_fallback_only_when_first_search_has_no_serious_candidate():
     )
     assert calls == len(brave.queries) == 2
     assert {item.registrable_domain for item in candidates} == {"unrelated.example", "acme.fr"}
+
+
+def test_discovery_query_uses_structured_commune_not_full_address():
+    item = target(
+        identity_location_snapshot="8 Villa des Fleurs 94220 Charenton-le-Pont",
+        local_commune_snapshot="Charenton-le-Pont",
+    )
+    first, _ = discovery_queries(item)
+    assert '"Charenton-le-Pont"' in first
+    assert "Villa des Fleurs" not in first and "94220" not in first
+
+
+def test_discovery_query_extracts_city_from_address_when_no_commune_exists():
+    first, _ = discovery_queries(target(
+        identity_location_snapshot="8 Villa des Fleurs 94220 Charenton-le-Pont",
+    ))
+    assert '"Charenton-le-Pont"' in first
+    assert "Villa des Fleurs" not in first and "94220" not in first
+
+
+def test_multilocal_company_discovery_uses_france():
+    first, _ = discovery_queries(target(is_multi_local=True, local_commune_snapshot="Créteil"))
+    assert '"France"' in first and "Créteil" not in first
+
+
+@pytest.mark.parametrize("location", ["94 - Charenton-le-Pont", "94"])
+def test_vague_department_location_falls_back_to_france(location):
+    first, _ = discovery_queries(target(identity_location_snapshot=location))
+    assert '"France"' in first and "94" not in first
+
+
+def test_missing_location_falls_back_to_france():
+    first, _ = discovery_queries(target(identity_location_snapshot=None))
+    assert '"France"' in first
 
 
 def test_deduplicates_same_domain_and_rejects_jobboards_and_socials():
@@ -294,6 +329,7 @@ def test_directory_profile_with_exact_siren_is_not_an_official_site():
     })
     result = verify_website_candidates(item, (candidate,), fetcher=fetcher, verified_at=NOW)[0]
     assert result.status == WebsiteVerificationStatus.REJECTED
+    assert result.score == 0
     assert "third_party_directory" in result.rejection_reasons
     assert any(signal.signal_type == "siren_exact" for signal in result.signals)
 
@@ -437,6 +473,72 @@ def test_fingerprints_stable_and_candidate_change_invalidates_verification(sessi
     fp2 = provider.resource_input_fingerprint(item, "verification")
     assert fp1 == fp1_again and fp1 != fp2
     assert candidate_set_fingerprint((first,)) != candidate_set_fingerprint((first, second))
+
+
+def test_discovery_policy_version_invalidates_only_discovery_cache_and_keeps_candidates(session, monkeypatch):
+    item = target()
+    repo = OfficialWebRepository(session)
+    candidate = _candidate(item)
+    repo.replace_candidates(official_web_target_fingerprint(item), (candidate,))
+    provider = OfficialWebProvider(repository=repo, fetcher=PageFetcher({}), now=lambda: NOW)
+    old_fingerprint = provider.resource_input_fingerprint(item, "discovery")
+    monkeypatch.setattr(provider_module, "DISCOVERY_POLICY_VERSION", 3)
+    new_fingerprint = provider.resource_input_fingerprint(item, "discovery")
+    assert old_fingerprint != new_fingerprint
+    persisted = repo.candidates(official_web_target_fingerprint(item))
+    assert [value.candidate_fingerprint for value in persisted] == [candidate.candidate_fingerprint]
+
+
+def test_verification_policy_version_invalidates_an_ambiguous_cache(session, monkeypatch):
+    item = target()
+    repo = OfficialWebRepository(session)
+    candidate = _candidate(item)
+    repo.replace_candidates(official_web_target_fingerprint(item), (candidate,))
+    provider = OfficialWebProvider(repository=repo, fetcher=PageFetcher({}), now=lambda: NOW)
+    old_fingerprint = provider.resource_input_fingerprint(item, "verification")
+    session.add(ContactProviderState(
+        provider="official_web", target_fingerprint=old_fingerprint, resource="verification",
+        company_key=item.company_key, target_scope=item.scope, siren=item.siren, local_key=item.local_key,
+        last_status=ContactProviderStatus.COMPLETED, last_attempt_at=NOW, last_success_at=NOW,
+        fresh_until=NOW.replace(year=2027), attempt_count=1, result_count=1,
+    ))
+    session.commit()
+    monkeypatch.setattr(provider_module, "VERIFICATION_POLICY_VERSION", 3)
+    new_fingerprint = provider.resource_input_fingerprint(item, "verification")
+    assert new_fingerprint != old_fingerprint
+    assert session.scalar(select(ContactProviderState).where(
+        ContactProviderState.target_fingerprint == new_fingerprint,
+        ContactProviderState.resource == "verification",
+    )) is None
+
+
+def test_extraction_fingerprint_depends_on_verified_domains_and_policy(session, monkeypatch):
+    item = target()
+    repo = OfficialWebRepository(session)
+    candidate = _candidate(item)
+    repo.replace_candidates(official_web_target_fingerprint(item), (candidate,))
+    verified = verify_website_candidates(item, (candidate,), fetcher=PageFetcher({
+        candidate.canonical_url: page(candidate.canonical_url, "ACME INDUSTRIE SAS SIREN 123456789"),
+    }), verified_at=NOW)
+    repo.persist_verified(verified, high_ttl=timedelta(days=90), review_ttl=timedelta(days=30))
+    provider = OfficialWebProvider(repository=repo, fetcher=PageFetcher({}), now=lambda: NOW)
+    old_fingerprint = provider.resource_input_fingerprint(item, "extraction")
+    monkeypatch.setattr(provider_module, "VERIFICATION_POLICY_VERSION", 3)
+    assert provider.resource_input_fingerprint(item, "extraction") != old_fingerprint
+
+
+def test_schema_normalizes_historic_rejected_score_to_zero(session):
+    record = VerifiedWebsiteRecord(
+        company_key="acme", target_scope=ContactScope.COMPANY, local_key=None,
+        target_fingerprint="target", candidate_fingerprint="candidate", candidate_set_fingerprint="set",
+        provider="official_web", canonical_url="https://third.example", registrable_domain="third.example",
+        status=WebsiteVerificationStatus.REJECTED, score=100, rejection_reasons=["third_party_directory"],
+        attribution_warnings=[], observed_at=NOW, verified_at=NOW, fresh_until=NOW, fingerprint="historic-rejected",
+    )
+    session.add(record)
+    session.commit()
+    ensure_official_web_schema(session.bind)
+    assert session.get(VerifiedWebsiteRecord, record.id).score == 0
 
 
 def test_batch_persists_artifacts_and_caches_resources_independently(session):

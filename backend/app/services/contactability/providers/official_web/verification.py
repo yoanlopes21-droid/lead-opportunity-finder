@@ -137,10 +137,14 @@ def _verify_one(
         rejection_reasons.append("siren_conflict")
     if any(signal.signal_type == "identity_conflict" for signal in signals):
         rejection_reasons.append("identity_conflict")
-    score = max(0, min(100, sum(signal.weight for signal in signals)))
+    identity_score = max(0, min(100, sum(signal.weight for signal in signals)))
     if rejection_reasons:
         status = WebsiteVerificationStatus.REJECTED
+        # Signals still document why a third-party page described the target,
+        # but a rejected domain has no usable official-site confidence.
+        score = 0
     else:
+        score = identity_score
         families = _positive_families(signals)
         exact_siren = any(signal.signal_type == "siren_exact" for signal in signals)
         # Identity facts prove that a page is about an organisation.  They do

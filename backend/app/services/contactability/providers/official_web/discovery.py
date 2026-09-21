@@ -52,6 +52,14 @@ _COMMON_NAME_TOKENS = {
     "et", "de", "la", "le", "les", "des", "du",
 }
 _MULTIPART_SUFFIXES = {"co.uk", "com.au", "co.nz"}
+_POSTAL_CITY_PATTERN = re.compile(
+    r"\b\d{5}\s+([A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ' -]{1,80})(?:\s*,|\s*$)"
+)
+_ADDRESS_MARKERS = re.compile(
+    r"\b(?:rue|avenue|av\.?|boulevard|bd\.?|chemin|route|place|villa|all[ée]e|impasse|quai)\b",
+    re.IGNORECASE,
+)
+_DEPARTMENT_ONLY_PATTERN = re.compile(r"^\s*\d{2}\s*(?:[-–/]\s*|$)")
 
 
 def discover_website_candidates(
@@ -104,17 +112,38 @@ def discover_website_candidates(
 def discovery_queries(target: ContactTarget) -> tuple[str, str]:
     official_name = target.organization_name_snapshot.strip()
     display_name = (target.display_name_snapshot or official_name).strip()
-    location = (
-        target.local_commune_snapshot
-        or ("France" if target.scope == ContactScope.COMPANY and target.is_multi_local else target.identity_location_snapshot)
-        or target.local_location_label_snapshot
-        or "France"
-    ).strip()
+    location = _discovery_location(target)
     # A SIREN is a strong verification fact, not a discovery keyword: it pulls
     # company-data directories ahead of the organisation's own domain.
     first = " ".join(part for part in (f'"{display_name}"', f'"{location}"', '"site officiel"') if part)
     second = f'"{display_name}" contact'
     return first, second
+
+
+def _discovery_location(target: ContactTarget) -> str:
+    """Return a short, safe geographic context; never a street address."""
+    if target.scope == ContactScope.COMPANY and target.is_multi_local:
+        return "France"
+    for value in (target.local_commune_snapshot, target.identity_location_snapshot,
+                  target.local_location_label_snapshot):
+        location = _short_reliable_location(value)
+        if location:
+            return location
+    return "France"
+
+
+def _short_reliable_location(value: Optional[str]) -> Optional[str]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    compact = " ".join(value.split()).strip(" ,;-")
+    if _DEPARTMENT_ONLY_PATTERN.match(compact):
+        return None
+    postal_city = _POSTAL_CITY_PATTERN.search(compact)
+    if postal_city:
+        return postal_city.group(1).strip(" ,;-")
+    if _ADDRESS_MARKERS.search(compact) or re.search(r"\b\d{1,5}\s+", compact):
+        return None
+    return compact[:100]
 
 
 def canonicalize_candidate_url(value: str) -> Optional[str]:

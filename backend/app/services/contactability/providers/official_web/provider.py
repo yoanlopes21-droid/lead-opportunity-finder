@@ -37,6 +37,9 @@ from app.services.contactability.providers.official_web.verification import (
 
 
 PROVIDER_NAME = "official_web"
+DISCOVERY_POLICY_VERSION = 2
+VERIFICATION_POLICY_VERSION = 2
+EXTRACTION_POLICY_VERSION = 1
 
 
 class OfficialWebProvider:
@@ -59,7 +62,7 @@ class OfficialWebProvider:
         extraction_contacts_ttl: timedelta = timedelta(days=30),
         extraction_people_ttl: timedelta = timedelta(days=45),
         extraction_not_found_ttl: timedelta = timedelta(days=14),
-        extraction_policy_version: int = 1,
+        extraction_policy_version: int = EXTRACTION_POLICY_VERSION,
         robots_policy: Optional[object] = None,
     ) -> None:
         self.repository = repository
@@ -124,7 +127,7 @@ class OfficialWebProvider:
                 "resource": resource,
                 "seeds": sorted((seed.source_provider, seed.url) for seed in seeds),
                 "brave_available": self.brave_client is not None,
-                "policy": 1,
+                "policy_version": DISCOVERY_POLICY_VERSION,
             })
         if resource == "verification":
             candidates = self.repository.candidates(self.target_fingerprint(target))
@@ -132,14 +135,15 @@ class OfficialWebProvider:
                 "target": self.target_fingerprint(target),
                 "resource": resource,
                 "candidate_set": candidate_set_fingerprint(candidates),
-                "policy": 1,
+                "policy_version": VERIFICATION_POLICY_VERSION,
             })
         if resource == "extraction":
             sites = self.repository.verified_sites_for_extraction(self.target_fingerprint(target))
             return _fingerprint({
                 "target": self.target_fingerprint(target), "resource": resource,
                 "verified_domains": sorted((site.registrable_domain, site.fingerprint, site.status) for site in sites),
-                "policy": self.extraction_policy_version,
+                "extraction_policy_version": self.extraction_policy_version,
+                "verification_policy_version": VERIFICATION_POLICY_VERSION,
             })
         raise ValueError("unknown official_web resource")
 

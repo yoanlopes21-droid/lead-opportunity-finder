@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Optional, Sequence
 
-from sqlalchemy import Engine, select
+from sqlalchemy import Engine, select, update
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -34,6 +34,15 @@ def ensure_official_web_schema(engine: Engine) -> None:
     WebsiteCandidateRecord.__table__.create(bind=engine, checkfirst=True)
     VerifiedWebsiteRecord.__table__.create(bind=engine, checkfirst=True)
     WebsiteVerificationSignalRecord.__table__.create(bind=engine, checkfirst=True)
+    # Before score semantics were clarified, a rejected third-party profile
+    # could retain a high raw identity-signal total. Signals remain available
+    # for audit, while score is normalized to usable confidence.
+    with engine.begin() as connection:
+        connection.execute(
+            update(VerifiedWebsiteRecord)
+            .where(VerifiedWebsiteRecord.status == WebsiteVerificationStatus.REJECTED)
+            .values(score=0)
+        )
 
 
 def invalidate_official_web_domain(
