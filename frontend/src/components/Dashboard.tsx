@@ -13,6 +13,7 @@ export function Dashboard() {
   const [page, setPage] = useState<CommercialLeadPage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [notice, setNotice] = useState<string | null>(null)
   const [refreshRun, setRefreshRun] = useState<JobOfferRefreshRun | null>(null)
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const refreshStartInFlight = useRef(false)
@@ -70,6 +71,7 @@ export function Dashboard() {
   const canGoNext = Boolean(page && page.offset + page.items.length < page.total)
 
   return <>
+    {notice && <p className="success-notice" role="status">{notice}</p>}
     <section className="summary-grid" aria-label="Résumé des leads">
       <article><span>Leads prioritaires</span><strong>{page?.total ?? '—'}</strong><small>résultat de la recherche actuelle</small></article>
       <article><span>Département</span><strong>94</strong><small>Val-de-Marne</small></article>
@@ -98,7 +100,7 @@ export function Dashboard() {
       {isLoading && !page && <div className="state-card" role="status">Chargement des opportunités locales…</div>}
       {error && <div className="state-card error-state" role="alert"><p>{error}</p><button type="button" onClick={() => void loadPage(page?.offset ?? 0)}>Réessayer</button></div>}
       {page && !error && page.items.length === 0 && <div className="state-card"><h3>Aucun lead à afficher</h3><p>Aucune opportunité ne correspond à cette recherche pour le moment.</p></div>}
-      {page && !error && page.items.length > 0 && <div className="lead-list">{page.items.map((lead) => <LeadCard key={lead.company_key} lead={lead} />)}</div>}
+      {page && !error && page.items.length > 0 && <div className="lead-list">{page.items.map((lead) => <LeadCard key={lead.company_key} lead={lead} onRelationshipSaved={(message) => { setNotice(message); void loadPage(page.offset) }} />)}</div>}
     </section>
     {page && !error && <nav className="pagination" aria-label="Pagination des leads"><button type="button" onClick={() => void loadPage(Math.max(0, page.offset - page.limit))} disabled={!canGoPrevious || isLoading}>Page précédente</button><p>{rangeStart}–{rangeEnd} sur {page.total}</p><button type="button" onClick={() => void loadPage(page.offset + page.limit)} disabled={!canGoNext || isLoading}>Page suivante</button></nav>}
   </>

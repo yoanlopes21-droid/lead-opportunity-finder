@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { fetchSearchRun } from './api'
 import { Dashboard } from './components/Dashboard'
 import { NewSearch } from './components/NewSearch'
+import { Prospection } from './components/Prospection'
 import { SearchProgress } from './components/SearchProgress'
 import { SearchResults } from './components/SearchResults'
 import type { SearchRun } from './types'
 
-type View = 'dashboard' | 'new-search' | 'progress' | 'results'
+type View = 'dashboard' | 'new-search' | 'prospection' | 'progress' | 'results'
 const RUN_STORAGE_KEY = 'lead-opportunity-finder.active-search-run-id'
 
 function storedRunId() {
@@ -43,10 +44,12 @@ export default function App() {
       <nav className="app-navigation" aria-label="Navigation principale">
         <button type="button" className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}>Dashboard</button>
         <button type="button" className={view === 'new-search' ? 'active' : ''} onClick={showNewSearch}>Nouvelle recherche</button>
+        <button type="button" className={view === 'prospection' ? 'active' : ''} onClick={() => setView('prospection')}>Prospection</button>
         {runId && <button type="button" className={view === 'progress' || view === 'results' ? 'active' : ''} onClick={openRun}>Recherche nº {runId}</button>}
       </nav>
       {view === 'dashboard' && <Dashboard />}
       {view === 'new-search' && <NewSearch activeRun={run} isRestoringRun={Boolean(runId && !run)} onCreated={(next) => { rememberRun(next); setView('progress') }} onOpenRun={openRun} />}
+      {view === 'prospection' && <Prospection />}
       {view === 'progress' && runId && <SearchProgress runId={runId} initialRun={run} onRunChange={rememberRun} onResults={() => setView('results')} />}
       {view === 'results' && runId && <SearchResults runId={runId} run={run} onProgress={() => setView('progress')} />}
     </main>

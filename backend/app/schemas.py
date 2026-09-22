@@ -264,6 +264,95 @@ class CommercialExclusionResponse(BaseModel):
     created_at: Optional[datetime]
 
 
+class CommercialExclusionCreateRequest(BaseModel):
+    company_name: str = Field(min_length=1, max_length=500)
+    exclusion_type: str
+    siren: Optional[str] = None
+    reason: Optional[str] = None
+    starts_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+
+
+class CommercialExclusionManagementResponse(CommercialExclusionResponse):
+    active: bool
+    status: str
+    matching_basis: str
+
+
+class CommercialExclusionListResponse(BaseModel):
+    items: list[CommercialExclusionManagementResponse]
+    total: int
+
+
+class CommercialExclusionCsvRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=2_000_000)
+
+
+class CommercialExclusionImportRowResponse(BaseModel):
+    line_number: int
+    company_name: Optional[str]
+    exclusion_type: Optional[str]
+    siren: Optional[str]
+    reason: Optional[str]
+    starts_at: Optional[datetime]
+    expires_at: Optional[datetime]
+    valid: bool
+    duplicate: bool
+    errors: list[str]
+
+
+class CommercialExclusionImportPreviewResponse(BaseModel):
+    rows: list[CommercialExclusionImportRowResponse]
+    valid_count: int
+    duplicate_count: int
+    invalid_count: int
+
+
+class CommercialExclusionImportResponse(CommercialExclusionImportPreviewResponse):
+    added_count: int
+    ignored_count: int
+
+
+class CommercialRelationshipUpdateRequest(BaseModel):
+    status: str
+    last_contact_at: Optional[datetime] = None
+    next_action_at: Optional[datetime] = None
+    note: Optional[str] = Field(default=None, max_length=2000)
+    outcome: Optional[str] = Field(default=None, max_length=500)
+    contact_point_id: Optional[int] = None
+    person_contact_id: Optional[int] = None
+    used_channel: Optional[str] = Field(default=None, max_length=50)
+
+
+class CommercialRelationshipFromLeadRequest(CommercialRelationshipUpdateRequest):
+    company_key: str = Field(min_length=1, max_length=500)
+
+
+class CommercialRelationshipResponse(BaseModel):
+    id: int
+    company_key: str
+    siren: Optional[str]
+    company_name_snapshot: str
+    status: str
+    last_contact_at: Optional[datetime]
+    next_action_at: Optional[datetime]
+    note: Optional[str]
+    outcome: Optional[str]
+    contact_point_id: Optional[int]
+    person_contact_id: Optional[int]
+    used_channel: Optional[str]
+    hard_exclusion_id: Optional[int]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    follow_up_timing: Optional[str] = None
+
+
+class CommercialRelationshipListResponse(BaseModel):
+    items: list[CommercialRelationshipResponse]
+    total: int
+
+
 class CommercialLeadResponse(BaseModel):
     company_key: str
     company_name: str
@@ -295,6 +384,7 @@ class CommercialLeadResponse(BaseModel):
     evidence: list[LeadEvidenceResponse]
     is_eligible: bool
     exclusion: Optional[CommercialExclusionResponse]
+    commercial_relationship: Optional[CommercialRelationshipResponse]
     recommended_channel: Optional[str]
     contacts: list[ContactPointResponse] = Field(default_factory=list)
     people: list[PersonContactResponse] = Field(default_factory=list)
@@ -360,6 +450,7 @@ class CommercialLeadResponse(BaseModel):
             evidence=[LeadEvidenceResponse(**item.__dict__) for item in lead.evidence],
             is_eligible=lead.is_eligible,
             exclusion=(CommercialExclusionResponse(**lead.exclusion.__dict__) if lead.exclusion else None),
+            commercial_relationship=(CommercialRelationshipResponse(**lead.commercial_relationship.__dict__) if lead.commercial_relationship else None),
             recommended_channel=lead.recommended_channel,
             contacts=[_contact_point_response(item, lead) for item in lead.contactability.contact_points],
             people=[_person_contact_response(item, lead) for item in lead.contactability.people if item.is_active and item.verification_status != "rejected"],

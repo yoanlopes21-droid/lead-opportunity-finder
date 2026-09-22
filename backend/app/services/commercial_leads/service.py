@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     CommercialExclusion,
+    CommercialRelationship,
     CompanyEnrichment,
     ContactEvidence,
     ContactPoint,
@@ -24,6 +25,7 @@ from app.services.commercial_leads.exclusions import (
     ExclusionTarget,
     evaluate_eligibility,
 )
+from app.services.commercial_relationships import CommercialRelationshipRecord, find_relationship
 from app.services.company_enrichment.contracts import MatchStatus
 from app.services.opportunities.company import (
     ActiveJobOffer,
@@ -90,6 +92,7 @@ class CommercialLead:
     evidence: tuple[LeadEvidence, ...]
     is_eligible: bool
     exclusion: Optional[CommercialExclusionRecord]
+    commercial_relationship: Optional[CommercialRelationshipRecord] = None
     recommended_channel: Optional[str] = None
     contactability: ContactabilityFacts = field(default_factory=ContactabilityFacts)
     contact_strategy: Optional[ContactStrategy] = None
@@ -143,10 +146,14 @@ def list_commercial_leads(
         CommercialExclusionRecord.from_model(row)
         for row in session.scalars(select(CommercialExclusion))
     )
+    relationships = tuple(
+        CommercialRelationshipRecord.from_model(row)
+        for row in session.scalars(select(CommercialRelationship).where(CommercialRelationship.is_active.is_(True)))
+    )
     evidence_by_key = _evidence_by_company_key(session, query.department_code)
     leads = [
         _build_lead(
-            opportunity, enrichments.get(opportunity.company_key), exclusions,
+            opportunity, enrichments.get(opportunity.company_key), exclusions, relationships,
             evidence_by_key.get(opportunity.company_key, ()), observed_at,
         )
         for opportunity in aggregation.opportunities
@@ -166,6 +173,7 @@ def _build_lead(
     opportunity: CompanyOpportunity,
     enrichment: Optional[CompanyEnrichment],
     exclusions: tuple[CommercialExclusionRecord, ...],
+    relationships: tuple[CommercialRelationshipRecord, ...],
     evidence: tuple[LeadEvidence, ...],
     now: datetime,
 ) -> CommercialLead:
@@ -176,6 +184,7 @@ def _build_lead(
     decision = evaluate_eligibility(
         ExclusionTarget(company_key=opportunity.company_key, siren=siren), exclusions, now
     )
+    commercial_relationship = find_relationship(opportunity.company_key, siren, relationships)
     return CommercialLead(
         company_key=opportunity.company_key,
         company_name=opportunity.company_name,
@@ -195,8 +204,9 @@ def _build_lead(
         latent_signals=tuple(signal for signal in opportunity.signals if signal.active),
         scoring=scoring,
         evidence=evidence,
-        is_eligible=decision.is_eligible,
+        is_eligible=decision.is_eligible and commercial_relationship is None,
         exclusion=decision.exclusion,
+        commercial_relationship=commercial_relationship,
     )
 
 

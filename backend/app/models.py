@@ -342,6 +342,28 @@ class CommercialExclusion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class CommercialRelationship(Base):
+    """Current lightweight prospecting state for one commercial company identity."""
+
+    __tablename__ = "commercial_relationships"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_key: Mapped[str] = mapped_column(String(500), unique=True, index=True)
+    siren: Mapped[Optional[str]] = mapped_column(String(9), index=True)
+    company_name_snapshot: Mapped[str] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(String(50), index=True)
+    last_contact_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    next_action_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    note: Mapped[Optional[str]] = mapped_column(Text)
+    outcome: Mapped[Optional[str]] = mapped_column(String(500))
+    contact_point_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contact_points.id"), index=True)
+    person_contact_id: Mapped[Optional[int]] = mapped_column(ForeignKey("person_contacts.id"), index=True)
+    used_channel: Mapped[Optional[str]] = mapped_column(String(50))
+    hard_exclusion_id: Mapped[Optional[int]] = mapped_column(ForeignKey("commercial_exclusions.id"), index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class PersonContact(Base):
     """A sourced professional person candidate; contact methods live in ContactPoint."""
 

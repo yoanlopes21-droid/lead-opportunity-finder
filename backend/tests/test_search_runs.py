@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.models import BraveUsageEvent, CommercialExclusion, ContactEvidence, ContactPoint, ObservedJobOffer, SearchRunItem, VerifiedWebsiteRecord
+from app.models import BraveUsageEvent, CommercialExclusion, CommercialRelationship, ContactEvidence, ContactPoint, ObservedJobOffer, SearchRunItem, VerifiedWebsiteRecord
 from app.services.commercial_leads.exclusions import ExclusionType
 from app.services.brave_usage import BraveBudgetExceeded, BraveBudgetPolicy, BraveUsageService
 from app.services.search_runs import (
@@ -116,6 +116,52 @@ def test_excluded_is_never_sent_to_enrichment(session):
     runner = SearchRunOrchestrator(enricher, clock=lambda: NOW)
     run = runner.resume(session, runner.create(session, requested_actionable_leads=1).id)
     assert run.status == SearchRunStatus.COMPLETED and enricher.calls == []
+
+
+def test_search_run_applies_all_exclusion_types_and_allows_expired_recent_prospect(session):
+    exclusions = (
+        ("current", ExclusionType.CURRENT_CLIENT, None),
+        ("manual", ExclusionType.MANUAL_EXCLUSION, None),
+        ("recent active", ExclusionType.RECENT_PROSPECT, NOW + timedelta(days=1)),
+        ("recent expired", ExclusionType.RECENT_PROSPECT, NOW - timedelta(hours=1)),
+    )
+    for key, exclusion_type, expires_at in exclusions:
+        offer(session, key)
+        session.add(CommercialExclusion(
+            company_key=key, siren=None, company_name_snapshot=key.upper(),
+            exclusion_type=exclusion_type, starts_at=NOW - timedelta(days=2),
+            expires_at=expires_at,
+        ))
+    session.commit()
+
+    enricher = AddActionableContact()
+    runner = SearchRunOrchestrator(enricher, clock=lambda: NOW)
+    run = runner.resume(session, runner.create(session, requested_actionable_leads=1).id)
+    statuses = {
+        item.company_key: item.status
+        for item in session.scalars(select(SearchRunItem).where(SearchRunItem.run_id == run.id))
+    }
+
+    assert statuses["current"] == SearchRunItemStatus.EXCLUDED
+    assert statuses["manual"] == SearchRunItemStatus.EXCLUDED
+    assert statuses["recent active"] == SearchRunItemStatus.EXCLUDED
+    assert statuses["recent expired"] == SearchRunItemStatus.ACTIONABLE
+    assert enricher.calls == ["recent expired"]
+
+
+def test_search_run_never_enriches_a_company_with_active_commercial_follow_up(session):
+    offer(session, "followed")
+    session.add(CommercialRelationship(
+        company_key="followed", siren=None, company_name_snapshot="FOLLOWED",
+        status="wrong_contact", is_active=True, created_at=NOW, updated_at=NOW,
+    ))
+    session.commit()
+    enricher = AddActionableContact()
+    runner = SearchRunOrchestrator(enricher, clock=lambda: NOW)
+    run = runner.resume(session, runner.create(session, requested_actionable_leads=1).id)
+    item = session.scalar(select(SearchRunItem).where(SearchRunItem.run_id == run.id))
+    assert item.status == SearchRunItemStatus.EXCLUDED
+    assert enricher.calls == []
 
 
 def test_unresolved_is_enriched_once_and_goal_stops_more_candidates(session):

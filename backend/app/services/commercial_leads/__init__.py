@@ -7,6 +7,9 @@ from app.services.commercial_leads.exclusions import (
     ExclusionType,
     create_commercial_exclusion,
     evaluate_eligibility,
+    find_duplicate_exclusion,
+    is_exclusion_active,
+    parse_exclusion_csv,
     parse_exclusion_rows,
 )
 from app.services.commercial_leads.service import (
@@ -26,6 +29,9 @@ __all__ = [
     "ExclusionTarget",
     "ExclusionType",
     "evaluate_eligibility",
+    "find_duplicate_exclusion",
+    "is_exclusion_active",
     "list_commercial_leads",
+    "parse_exclusion_csv",
     "parse_exclusion_rows",
 ]

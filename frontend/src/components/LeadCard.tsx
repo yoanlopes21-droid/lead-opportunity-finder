@@ -1,6 +1,9 @@
+import { useState } from 'react'
+import { createCommercialRelationshipFromLead } from '../api'
 import type { ActiveJobOffer, CommercialLead, ContactPoint, PersonContact, Provenance, ScoreReason } from '../types'
+import { RelationshipModal } from './RelationshipModal'
 
-type LeadCardProps = { lead: CommercialLead }
+type LeadCardProps = { lead: CommercialLead; onRelationshipSaved?: (message: string) => void }
 
 const categoryMeta: Record<string, { label: string; tone: string }> = {
   '🔥 priorité très forte': { label: 'Priorité très forte', tone: 'very-high' }, '🟢 bon prospect': { label: 'Bon prospect', tone: 'good' }, '🟠 à surveiller / priorité moyenne': { label: 'À surveiller', tone: 'medium' }, '⚪ faible priorité': { label: 'Faible priorité', tone: 'low' },
@@ -12,6 +15,7 @@ const webLabels: Record<string, string> = { high_confidence: 'Site officiel vér
 const sectorLabels: Record<string, string> = { private: 'Secteur privé', public: 'Secteur public', nonprofit: 'Association / organisme à but non lucratif', unknown: 'Secteur non précisé' }
 const confidenceLabels: Record<string, string> = { high_confidence: 'Confiance élevée', confirmed: 'Confiance élevée', high: 'Confiance élevée', medium: 'Confiance moyenne', low: 'Confiance faible', review_needed: 'À vérifier', ambiguous: 'Ambigu', rejected: 'Rejeté', unresolved: 'À enrichir', unverified: 'À vérifier' }
 const providerLabels: Record<string, string> = { official_web: 'Site officiel', offer_description: 'Offre d’emploi', societe_com: 'Societe.com' }
+const exclusionLabels: Record<string, string> = { current_client: 'Client actuel', recent_prospect: 'Prospect récent', manual_exclusion: 'Exclusion manuelle' }
 const reasonLabels: Record<string, string> = { competing_domains: 'Plusieurs domaines concurrents', third_party_commercial_aggregator: 'Site tiers / comparateur', third_party_directory: 'Annuaire tiers', official_page_contact: 'Page contact', official_page_person_role: 'Page équipe', page_contact: 'Page contact', role_rh: 'Page équipe', email_public: 'Coordonnée publique' }
 const fmtDate = (value: string | null) => value ? new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(value)) : null
 const label = (value: string, labels: Record<string, string>) => labels[value] ?? (value.includes('_') ? value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : value)
@@ -63,7 +67,10 @@ function Person({ person, contacts }: { person: PersonContact; contacts: Contact
   return <article className="person"><strong>{person.display_name}</strong><span>{person.role_title ?? label(person.relevance, targetLabels)} · {label(person.scope, scopeLabels)} · {label(person.confidence, confidenceLabels)}</span>{linked.map((contact) => <ContactValue key={contact.id} contact={contact} />)}{person.warnings.map((warning) => <small key={warning}>{warning}</small>)}<details><summary>Provenance</summary><ProvenanceList items={person.provenance} /></details></article>
 }
 
-export function LeadCard({ lead }: LeadCardProps) {
+export function LeadCard({ lead, onRelationshipSaved }: LeadCardProps) {
+  const [showRelationshipModal, setShowRelationshipModal] = useState(false)
+  const [quickSaving, setQuickSaving] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   const category = categoryMeta[lead.category] ?? { label: lead.category, tone: 'low' }
   const strategy = lead.contact_strategy
   const contact = lead.contacts.find((item) => item.id === strategy.preferred_contact_point_id)
@@ -78,8 +85,19 @@ export function LeadCard({ lead }: LeadCardProps) {
   const signals = lead.latent_signals.filter((signal) => signal.active).slice(0, 2)
   const relationship = lead.employer_relationship_status
 
+  async function markContacted() {
+    setQuickSaving(true); setActionError(null)
+    try {
+      await createCommercialRelationshipFromLead(lead.company_key, { status: 'contacted', last_contact_at: new Date().toISOString() })
+      onRelationshipSaved?.(`${lead.company_name} est maintenant dans le suivi commercial.`)
+    } catch (requestError) { setActionError(requestError instanceof Error ? requestError.message : 'Impossible de mettre à jour le suivi.') }
+    finally { setQuickSaving(false) }
+  }
+
   return <article className="lead-card">
-    <header className="lead-card-header"><div><p className={`category-badge ${category.tone}`}><span aria-hidden="true">{lead.category.slice(0, 2)}</span> {category.label}</p><h2>{lead.company_name}</h2>{lead.official_name && lead.official_name !== lead.company_name && <p className="official-name">{lead.official_name}</p>}</div><div className="score" aria-label={`Score commercial ${lead.total_score} sur 100`}><small>Score commercial</small><strong>{lead.total_score}</strong><span>/100</span></div></header>
+    <header className="lead-card-header"><div><p className={`category-badge ${category.tone}`}><span aria-hidden="true">{lead.category.slice(0, 2)}</span> {category.label}</p><h2>{lead.company_name}</h2>{lead.official_name && lead.official_name !== lead.company_name && <p className="official-name">{lead.official_name}</p>}</div><div className="lead-card-tools"><div className="score" aria-label={`Score commercial ${lead.total_score} sur 100`}><small>Score commercial</small><strong>{lead.total_score}</strong><span>/100</span></div><details className="lead-actions"><summary aria-label={`Actions pour ${lead.company_name}`}>•••</summary><div><button type="button" onClick={() => setShowRelationshipModal(true)}>Mettre à jour le suivi commercial</button><button type="button" onClick={() => void markContacted()} disabled={quickSaving}>{quickSaving ? 'Enregistrement…' : 'Marquer comme contacté'}</button></div></details></div></header>
+    {actionError && <p className="inline-error" role="alert">{actionError}</p>}
+    {!lead.is_eligible && lead.exclusion && <p className="exclusion-note"><strong>Entreprise exclue — {exclusionLabels[lead.exclusion.exclusion_type] ?? 'Exclusion'}.</strong>{lead.exclusion.reason && <> {lead.exclusion.reason}</>}</p>}
     {relationship === 'intermediary' && <p className="relationship-note"><strong>Cabinet / intermédiaire.</strong> Les coordonnées sont celles de l’intermédiaire.</p>}{relationship === 'intermediary_suspected' && <p className="relationship-note warning"><strong>Intermédiaire possible.</strong> Vérifiez la relation employeur avant contact.</p>}
     <dl className="lead-facts"><div><dt>Localisation</dt><dd>{lead.primary_location ?? 'Non précisée'}</dd></div><div><dt>Secteur</dt><dd>{label(lead.entity_sector_type, sectorLabels)}</dd></div>{lead.employee_range && <div><dt>Effectif</dt><dd>{lead.employee_range === 'unknown' ? 'Non précisé' : lead.employee_range}</dd></div>}<div><dt>Offres d’emploi actives</dt><dd>{lead.active_offer_count}</dd></div><div><dt>Diversité de rôles</dt><dd>{lead.role_diversity}</dd></div>{fmtDate(lead.newest_offer_date) && <div><dt>Offre la plus récente</dt><dd>{fmtDate(lead.newest_offer_date)}</dd></div>}</dl>
     {lead.representative_roles.length > 0 && <div className="roles">{lead.representative_roles.slice(0, 4).map((role) => <span key={role}>{role}</span>)}</div>}
@@ -92,5 +110,6 @@ export function LeadCard({ lead }: LeadCardProps) {
       {lead.people.length > 0 && <section className="people"><h3>Personnes identifiées</h3>{lead.people.map((item) => <Person key={item.id} person={item} contacts={lead.contacts} />)}</section>}
     </details>
     {(highlights.length > 0 || signals.length > 0 || lead.adjustments.length > 0 || lead.penalties.length > 0) && <details className="score-explanation"><summary>Pourquoi ce score ?</summary><div className="explanation-content"><ReasonList title="Points forts" reasons={highlights} />{signals.length > 0 && <div className="reason-list"><span>Signaux observés</span><ul>{signals.map((signal) => <li key={signal.name}>{signal.explanation}</li>)}</ul></div>}<ReasonList title="Ajustements" reasons={lead.adjustments} /><ReasonList title="Points de vigilance" reasons={lead.penalties} variant="penalty" /></div></details>}
+    {showRelationshipModal && <RelationshipModal lead={lead} onClose={() => setShowRelationshipModal(false)} onSaved={() => { setShowRelationshipModal(false); onRelationshipSaved?.(`${lead.company_name} est maintenant dans le suivi commercial.`) }} />}
   </article>
 }
