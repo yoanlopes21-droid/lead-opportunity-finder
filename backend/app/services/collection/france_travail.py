@@ -32,6 +32,10 @@ from app.services.persistence.offers import (
     record_skipped_offers,
     upsert_offer,
 )
+from app.services.collection.providers import (
+    JobOfferProviderCollector,
+    ProviderPage,
+)
 
 
 FRANCE_TRAVAIL_SOURCE = "france_travail"
@@ -74,55 +78,13 @@ class FranceTravailDepartmentCollector:
         self._page_size = page_size
 
     def collect(self, session: Session, run: CollectionRun | None = None) -> FranceTravailCollectionResult:
-        run = run or create_collection_run(
-            session, source=FRANCE_TRAVAIL_SOURCE, scope_type=DEPARTMENT_SCOPE_TYPE,
-            scope_value=VAL_DE_MARNE_DEPARTMENT,
-        )
-        if run.status == CollectionRunStatus.QUEUED:
-            run.status = CollectionRunStatus.RUNNING
-        run_id = run.id
-        session.commit()
-
-        try:
-            expected_offset: int | None = 0
-            for page in self._page_source.iter_department_pages(page_size=self._page_size):
-                self._validate_page(page, expected_offset)
-                record_skipped_offers(run, page.skipped_offers)
-                for offer in page.offers:
-                    self._validate_offer_scope(offer)
-                    upsert_offer(session, run, _to_snapshot(offer))
-                run.pages_processed += 1
-                # A page is a durable progress checkpoint. It prevents a later
-                # remote error from losing valid observations already collected.
-                session.commit()
-                expected_offset = page.next_offset
-
-            if expected_offset is not None:
-                raise ValueError("France Travail pagination ended before the final page")
-
-            complete_collection_run(
-                session,
-                run,
-                full_scope_completed=True,
-                deactivate_unseen=True,
-            )
-            session.commit()
-        except Exception as exc:
-            # A persistence error can leave the current transaction invalid.
-            # Roll it back first, then record the failed lifecycle state in a
-            # fresh transaction.  No offer deactivation is attempted here.
-            session.rollback()
-            failed_run = session.get(CollectionRun, run_id)
-            if failed_run is not None and failed_run.status == CollectionRunStatus.RUNNING:
-                failed_run.error_summary = _safe_error_summary(exc)
-                fail_collection_run(session, failed_run)
-                session.commit()
-            raise
-
-        completed_run = session.get(CollectionRun, run_id)
-        if completed_run is None:  # Defensive: a committed run must be readable.
+        generic = JobOfferProviderCollector(
+            FranceTravailDepartmentProvider(self._page_source, self._page_size)
+        ).collect(session, run=run)
+        completed_run = session.get(CollectionRun, generic.run_id)
+        if completed_run is None:
             raise RuntimeError("completed collection run could not be reloaded")
-        return _result_from_run(completed_run)
+        return _result_from_run(completed_run, pages_processed=generic.pages_processed)
 
     @staticmethod
     def _validate_page(page: OfferSearchPage, expected_offset: int | None) -> None:
@@ -141,6 +103,35 @@ class FranceTravailDepartmentCollector:
             raise ValueError("France Travail collection received an offer from another source")
         if offer.department_code != VAL_DE_MARNE_DEPARTMENT:
             raise ValueError("France Travail collection received an offer outside department 94")
+
+
+class FranceTravailDepartmentProvider:
+    """Adapter keeping the official connector behind the generic provider contract."""
+
+    provider_id = FRANCE_TRAVAIL_SOURCE
+    scope_type = DEPARTMENT_SCOPE_TYPE
+    scope_value = VAL_DE_MARNE_DEPARTMENT
+    can_deactivate_unseen = True
+
+    def __init__(self, page_source: FranceTravailPageSource, page_size: int = MAX_PAGE_SIZE):
+        self.page_source = page_source
+        self.page_size = page_size
+
+    def iter_pages(self) -> Iterable[ProviderPage]:
+        expected_offset: int | None = 0
+        for page_number, page in enumerate(
+            self.page_source.iter_department_pages(page_size=self.page_size), start=1
+        ):
+            FranceTravailDepartmentCollector._validate_page(page, expected_offset)
+            for offer in page.offers:
+                FranceTravailDepartmentCollector._validate_offer_scope(offer)
+            yield ProviderPage(
+                page_number=page_number,
+                offers=tuple(_to_snapshot(offer) for offer in page.offers),
+                skipped_count=page.skipped_offers,
+                is_last=page.next_offset is None,
+            )
+            expected_offset = page.next_offset
 
 
 class FranceTravailCompleteDepartmentCollector:

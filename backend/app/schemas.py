@@ -136,6 +136,13 @@ class LocalOpportunityResponse(BaseModel):
     person_contact_ids: list[int] = Field(default_factory=list)
 
 
+class JobOfferEvidenceResponse(BaseModel):
+    source: str
+    source_offer_id: str
+    source_url: Optional[str]
+    discovery_provider: Optional[str]
+
+
 class ActiveJobOfferResponse(BaseModel):
     offer_id: str
     title: str
@@ -148,6 +155,10 @@ class ActiveJobOfferResponse(BaseModel):
     salary: Optional[str]
     source: str
     source_url: Optional[str]
+    sources: list[str]
+    source_urls: list[str]
+    source_offer_ids: list[str]
+    evidence: list[JobOfferEvidenceResponse]
     local_key: str
     age_days: Optional[int]
 
@@ -404,7 +415,15 @@ class CommercialLeadResponse(BaseModel):
             department=lead.scoring.department_code,
             primary_location=lead.principal_location,
             active_offer_count=lead.active_offer_count,
-            active_job_offers=[ActiveJobOfferResponse(**item.__dict__) for item in lead.active_job_offers],
+            active_job_offers=[ActiveJobOfferResponse(
+                **{
+                    **item.__dict__,
+                    "sources": list(item.sources),
+                    "source_urls": list(item.source_urls),
+                    "source_offer_ids": list(item.source_offer_ids),
+                    "evidence": [JobOfferEvidenceResponse(**row.__dict__) for row in item.evidence],
+                }
+            ) for item in lead.active_job_offers],
             role_diversity=lead.distinct_job_title_count,
             representative_roles=list(lead.representative_job_titles),
             newest_offer_date=lead.newest_offer_created_at,

@@ -1,0 +1,29 @@
+{
+  "jobs": [
+    {
+      "id": 101,
+      "title": "Technicien maintenance",
+      "absolute_url": "https://boards.greenhouse.io/example/jobs/101",
+      "location": {"name": "Créteil, Val-de-Marne, France"},
+      "updated_at": "2026-09-20T08:30:00Z",
+      "content": "Maintenance des équipements du site."
+    },
+    {
+      "id": 102,
+      "title": "Responsable de site",
+      "absolute_url": "https://boards.greenhouse.io/example/jobs/102",
+      "location": {"name": "Paris, France"},
+      "updated_at": "2026-09-20T09:00:00Z",
+      "content": "Pilotage du site."
+    },
+    {
+      "id": 103,
+      "title": "Commercial terrain",
+      "absolute_url": "https://boards.greenhouse.io/example/jobs/103",
+      "location": {"name": "94120 Fontenay-sous-Bois, France"},
+      "updated_at": null,
+      "content": "Développement commercial."
+    }
+  ],
+  "meta": {"total": 3}
+}

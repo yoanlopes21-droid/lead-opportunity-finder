@@ -99,6 +99,7 @@ class ObservedJobOffer(Base):
     contract_type: Mapped[Optional[str]] = mapped_column(String(100))
     salary: Mapped[Optional[str]] = mapped_column(String(500))
     source_url: Mapped[Optional[str]] = mapped_column(String(2048))
+    discovery_provider: Mapped[Optional[str]] = mapped_column(String(120), index=True)
     origin: Mapped[Optional[str]] = mapped_column(String(255))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
@@ -108,6 +109,49 @@ class ObservedJobOffer(Base):
     last_seen_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("collection_runs.id"), index=True)
     __table_args__ = (
         UniqueConstraint("source", "source_offer_id", name="uq_observed_job_offer_source_id"),
+    )
+
+
+class RecruitmentSignal(Base):
+    """An incomplete public recruitment clue that must not masquerade as an offer."""
+
+    __tablename__ = "recruitment_signals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    discovery_provider: Mapped[str] = mapped_column(String(120), index=True)
+    source: Mapped[str] = mapped_column(String(120), index=True)
+    source_url: Mapped[str] = mapped_column(String(2048))
+    title: Mapped[Optional[str]] = mapped_column(String(500))
+    snippet: Mapped[Optional[str]] = mapped_column(Text)
+    company_name: Mapped[Optional[str]] = mapped_column(String(500), index=True)
+    location_label: Mapped[Optional[str]] = mapped_column(String(500))
+    department_code: Mapped[Optional[str]] = mapped_column(String(10), index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    observation_count: Mapped[int] = mapped_column(Integer, default=1)
+    last_seen_run_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("collection_runs.id"), index=True
+    )
+    __table_args__ = (
+        UniqueConstraint(
+            "discovery_provider", "source_url", name="uq_recruitment_signal_provider_url"
+        ),
+    )
+
+
+class JobDiscoveryQueryCache(Base):
+    """Short-lived Brave result cache; cached reads never touch the usage ledger."""
+
+    __tablename__ = "job_discovery_query_cache"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(120), index=True)
+    query_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    results: Mapped[list] = mapped_column(JSON, default=list)
+    cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    fresh_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    __table_args__ = (
+        UniqueConstraint(
+            "provider", "query_fingerprint", name="uq_job_discovery_cache_provider_query"
+        ),
     )
 
 

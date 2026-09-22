@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.services.persistence.offers import (
     UpsertOutcome,
     complete_collection_run,
     create_collection_run,
+    ensure_collection_run_schema,
     fail_collection_run,
     record_skipped_offers,
     upsert_offer,
@@ -211,3 +212,90 @@ def test_failed_or_incomplete_run_never_deactivates_absent_offers(session):
         )
     assert incomplete_run.status == CollectionRunStatus.RUNNING
     assert offer.is_active is True
+
+
+def test_existing_sqlite_offer_schema_is_upgraded_additively_without_data_loss(tmp_path):
+    """Exercise the production bootstrap order against the pre-multi-source shape."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy-offers.sqlite3'}")
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE collection_runs (
+                id INTEGER PRIMARY KEY,
+                source VARCHAR(120) NOT NULL,
+                scope_type VARCHAR(50) NOT NULL,
+                scope_value VARCHAR(120) NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                is_full_scope BOOLEAN NOT NULL DEFAULT 0,
+                started_at DATETIME NOT NULL,
+                finished_at DATETIME,
+                offers_received INTEGER NOT NULL DEFAULT 0,
+                offers_new INTEGER NOT NULL DEFAULT 0,
+                offers_updated INTEGER NOT NULL DEFAULT 0,
+                offers_unchanged INTEGER NOT NULL DEFAULT 0,
+                offers_skipped INTEGER NOT NULL DEFAULT 0,
+                offers_deactivated INTEGER NOT NULL DEFAULT 0
+            )
+        """))
+        connection.execute(text("""
+            CREATE TABLE observed_job_offers (
+                id INTEGER PRIMARY KEY,
+                source VARCHAR(120) NOT NULL,
+                source_offer_id VARCHAR(255) NOT NULL,
+                title VARCHAR(500) NOT NULL,
+                description TEXT,
+                company_name VARCHAR(500),
+                location_label VARCHAR(500),
+                commune VARCHAR(255),
+                department_code VARCHAR(10),
+                created_at VARCHAR(64),
+                updated_at VARCHAR(64),
+                contract_type VARCHAR(100),
+                salary VARCHAR(500),
+                source_url VARCHAR(2048),
+                origin VARCHAR(255),
+                first_seen_at DATETIME NOT NULL,
+                last_seen_at DATETIME NOT NULL,
+                last_changed_at DATETIME NOT NULL,
+                is_active BOOLEAN NOT NULL DEFAULT 1,
+                observation_count INTEGER NOT NULL DEFAULT 1,
+                last_seen_run_id INTEGER,
+                CONSTRAINT uq_observed_job_offer_source_id
+                    UNIQUE (source, source_offer_id),
+                FOREIGN KEY(last_seen_run_id) REFERENCES collection_runs (id)
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO observed_job_offers (
+                id, source, source_offer_id, title, company_name,
+                department_code, first_seen_at, last_seen_at, last_changed_at,
+                is_active, observation_count
+            ) VALUES (
+                7, 'france_travail', 'FT-LEGACY', 'Technicien', 'Entreprise Test',
+                '94', '2026-09-01 08:00:00', '2026-09-20 08:00:00',
+                '2026-09-01 08:00:00', 1, 3
+            )
+        """))
+
+    # This is the same schema order used by the FastAPI lifespan.
+    Base.metadata.create_all(engine)
+    ensure_collection_run_schema(engine)
+
+    schema = inspect(engine)
+    offer_columns = {column["name"] for column in schema.get_columns("observed_job_offers")}
+    run_columns = {column["name"] for column in schema.get_columns("collection_runs")}
+    offer_indexes = {index["name"] for index in schema.get_indexes("observed_job_offers")}
+    assert "discovery_provider" in offer_columns
+    assert "ix_observed_job_offers_discovery_provider" in offer_indexes
+    assert {"temporal_windows", "pages_processed", "error_summary"} <= run_columns
+    assert {"recruitment_signals", "job_discovery_query_cache"} <= set(schema.get_table_names())
+
+    with Session(engine) as session:
+        offer = session.get(ObservedJobOffer, 7)
+        assert offer is not None
+        assert offer.source == "france_travail"
+        assert offer.source_offer_id == "FT-LEGACY"
+        assert offer.discovery_provider is None
+        assert offer.is_active is True
+        assert offer.observation_count == 3
+        assert session.query(ObservedJobOffer).count() == 1
+    engine.dispose()

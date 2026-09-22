@@ -11,7 +11,7 @@ from sqlalchemy import inspect, or_, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from app.models import CollectionRun, ObservedJobOffer
+from app.models import CollectionRun, ObservedJobOffer, RecruitmentSignal
 
 
 class CollectionRunStatus:
@@ -45,7 +45,22 @@ class OfferSnapshot:
     contract_type: Optional[str] = None
     salary: Optional[str] = None
     source_url: Optional[str] = None
+    discovery_provider: Optional[str] = None
     origin: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RecruitmentSignalSnapshot:
+    """Minimum durable form of a web result that is not a verified job offer."""
+
+    discovery_provider: str
+    source: str
+    source_url: str
+    title: Optional[str] = None
+    snippet: Optional[str] = None
+    company_name: Optional[str] = None
+    location_label: Optional[str] = None
+    department_code: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -66,6 +81,7 @@ _SIGNIFICANT_FIELDS = (
     "contract_type",
     "salary",
     "source_url",
+    "discovery_provider",
     "origin",
 )
 
@@ -97,8 +113,8 @@ def upsert_offer(
 ) -> UpsertResult:
     """Persist one observation while retaining first-seen and significant-change history."""
     _require_running_run(run)
-    if snapshot.source != run.source:
-        raise ValueError("offer source must match its collection run")
+    if snapshot.source != run.source and snapshot.discovery_provider != run.source:
+        raise ValueError("offer source or discovery provider must match its collection run")
 
     observed_at = now or _utc_now()
     offer = session.scalar(
@@ -155,6 +171,39 @@ def upsert_offer(
     return UpsertResult(offer=offer, outcome=outcome)
 
 
+def upsert_recruitment_signal(
+    session: Session,
+    run: CollectionRun,
+    snapshot: RecruitmentSignalSnapshot,
+    now: Optional[datetime] = None,
+) -> RecruitmentSignal:
+    """Persist a clue separately; missing offer fields are never synthesized."""
+    _require_running_run(run)
+    if snapshot.discovery_provider != run.source:
+        raise ValueError("signal discovery provider must match its collection run")
+    if not snapshot.source_url.strip():
+        raise ValueError("signal source URL is required")
+    observed_at = now or _utc_now()
+    signal = session.scalar(select(RecruitmentSignal).where(
+        RecruitmentSignal.discovery_provider == snapshot.discovery_provider,
+        RecruitmentSignal.source_url == snapshot.source_url,
+    ))
+    if signal is None:
+        signal = RecruitmentSignal(
+            **snapshot.__dict__, first_seen_at=observed_at, last_seen_at=observed_at,
+            observation_count=1, last_seen_run_id=run.id,
+        )
+        session.add(signal)
+    elif signal.last_seen_run_id != run.id:
+        for name, value in snapshot.__dict__.items():
+            setattr(signal, name, value)
+        signal.last_seen_at = observed_at
+        signal.observation_count += 1
+        signal.last_seen_run_id = run.id
+    session.flush()
+    return signal
+
+
 def record_skipped_offers(run: CollectionRun, count: int = 1) -> None:
     _require_running_run(run)
     if count < 0:
@@ -200,14 +249,19 @@ def fail_collection_run(
 def _deactivate_unseen_offers(session: Session, run: CollectionRun) -> int:
     if run.status != CollectionRunStatus.COMPLETED or not run.is_full_scope:
         raise ValueError("only a completed full-scope run may deactivate unseen offers")
-    if run.scope_type != "department":
-        raise ValueError("automatic deactivation currently supports department scopes only")
+    scope_filter = None
+    if run.scope_type == "department":
+        scope_filter = ObservedJobOffer.department_code == run.scope_value
+    elif run.scope_type == "provider_board":
+        scope_filter = ObservedJobOffer.origin == run.scope_value
+    else:
+        raise ValueError("automatic deactivation does not support this scope type")
 
     result = session.execute(
         update(ObservedJobOffer)
         .where(
             ObservedJobOffer.source == run.source,
-            ObservedJobOffer.department_code == run.scope_value,
+            scope_filter,
             ObservedJobOffer.is_active.is_(True),
             or_(
                 ObservedJobOffer.last_seen_run_id.is_(None),
@@ -248,3 +302,16 @@ def ensure_collection_run_schema(engine: Engine) -> None:
         for name, definition in additions.items():
             if name not in existing:
                 connection.execute(text(f"ALTER TABLE collection_runs ADD COLUMN {name} {definition}"))
+    if "observed_job_offers" in inspect(engine).get_table_names():
+        offer_columns = {
+            column["name"] for column in inspect(engine).get_columns("observed_job_offers")
+        }
+        with engine.begin() as connection:
+            if "discovery_provider" not in offer_columns:
+                connection.execute(text(
+                    "ALTER TABLE observed_job_offers ADD COLUMN discovery_provider VARCHAR(120)"
+                ))
+            connection.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_observed_job_offers_discovery_provider "
+                "ON observed_job_offers (discovery_provider)"
+            ))

@@ -61,8 +61,31 @@ class ActiveJobOffer:
     salary: Optional[str]
     source: str
     source_url: Optional[str]
+    sources: tuple[str, ...]
+    source_urls: tuple[str, ...]
+    source_offer_ids: tuple[str, ...]
+    evidence: tuple["JobOfferEvidence", ...]
     local_key: str
     age_days: Optional[int]
+
+
+@dataclass(frozen=True)
+class JobOfferEvidence:
+    source: str
+    source_offer_id: str
+    source_url: Optional[str]
+    discovery_provider: Optional[str]
+
+
+@dataclass(frozen=True)
+class _CanonicalOffer:
+    """In-memory commercial need; every persisted source observation is retained."""
+
+    observations: tuple[ObservedJobOffer, ...]
+
+    @property
+    def representative(self) -> ObservedJobOffer:
+        return self.observations[0]
 
 
 @dataclass(frozen=True)
@@ -167,37 +190,42 @@ def _build_opportunity(
     observed_at: datetime,
 ) -> CompanyOpportunity:
     original_name = next(offer.company_name.strip() for offer in offers if offer.company_name)
-    dated_offers = [(offer, _parse_datetime(offer.created_at)) for offer in offers]
-    ages = [max((observed_at - created_at).total_seconds() / 86400, 0) for _, created_at in dated_offers if created_at]
-    dates = [created_at for _, created_at in dated_offers if created_at]
+    canonical_offers = _canonicalize_offers(offers)
+    canonical_dates = [_canonical_date(item) for item in canonical_offers]
+    ages = [max((observed_at - created_at).total_seconds() / 86400, 0) for created_at in canonical_dates if created_at]
+    dates = [created_at for created_at in canonical_dates if created_at]
     sources = _sorted_distinct(offer.source for offer in offers)
-    titles = _representative_distinct((offer.title, _normalize_text_key(offer.title)) for offer in offers)
+    titles = _representative_distinct(
+        (item.representative.title, _normalize_role_key(item.representative.title))
+        for item in canonical_offers
+    )
     contracts = _sorted_distinct(offer.contract_type for offer in offers)
     communes = _sorted_distinct(offer.commune for offer in offers)
     labels = _sorted_distinct(offer.location_label for offer in offers)
     distinct_locations = _sorted_distinct(
         offer.commune if offer.commune else offer.location_label for offer in offers
     )
-    cdi_count = sum(1 for offer in offers if _normalize_text_key(offer.contract_type) == "cdi")
-    cdd_count = sum(1 for offer in offers if _normalize_text_key(offer.contract_type) == "cdd")
-    other_count = len(offers) - cdi_count - cdd_count
+    canonical_contracts = [_canonical_value(item, "contract_type") for item in canonical_offers]
+    cdi_count = sum(1 for value in canonical_contracts if _normalize_text_key(value) == "cdi")
+    cdd_count = sum(1 for value in canonical_contracts if _normalize_text_key(value) == "cdd")
+    other_count = len(canonical_offers) - cdi_count - cdd_count
     oldest = min(dates) if dates else None
     newest = max(dates) if dates else None
     rounded_ages = [int(age) for age in ages]
     signals = (
-        OpportunitySignal("hiring_volume_signal", len(offers) >= 2, f"{len(offers)} offre(s) active(s)."),
+        OpportunitySignal("hiring_volume_signal", len(canonical_offers) >= 2, f"{len(canonical_offers)} besoin(s) de recrutement actif(s)."),
         OpportunitySignal("role_diversity_signal", len(titles) >= 2, f"{len(titles)} intitulé(s) distinct(s)."),
         OpportunitySignal("persistent_need_signal", any(age > 21 for age in ages), f"{sum(age > 21 for age in ages)} offre(s) active(s) de plus de 21 jours."),
         OpportunitySignal("multi_location_signal", len(distinct_locations) >= 2, f"{len(distinct_locations)} lieu(x) distinct(s)."),
         OpportunitySignal("recurrent_observation_signal", any(offer.observation_count >= 2 for offer in offers), f"{sum(offer.observation_count >= 2 for offer in offers)} offre(s) observée(s) dans plusieurs runs."),
     )
     intermediary_description_evidence = analyze_intermediary_descriptions(offers)
-    local_opportunities = _build_local_opportunities(offers, department_code)
+    local_opportunities = _build_local_opportunities(canonical_offers, department_code)
     return CompanyOpportunity(
         company_key=company_key,
         company_name=original_name,
         department_code=department_code,
-        active_offer_count=len(offers),
+        active_offer_count=len(canonical_offers),
         distinct_job_title_count=len(titles),
         distinct_source_count=len(sources),
         sources=sources,
@@ -219,21 +247,31 @@ def _build_opportunity(
         average_offer_age_days=round(sum(ages) / len(ages), 1) if ages else None,
         median_offer_age_days=round(float(median(ages)), 1) if ages else None,
         signals=signals,
-        active_job_offers=_active_job_offers(offers, department_code, observed_at),
+        active_job_offers=_active_job_offers(canonical_offers, department_code, observed_at),
         intermediary_description_evidence=intermediary_description_evidence,
         local_opportunities=local_opportunities,
     )
 
 
 def _active_job_offers(
-    offers: Sequence[ObservedJobOffer], department_code: str, observed_at: datetime,
+    offers: Sequence[_CanonicalOffer], department_code: str, observed_at: datetime,
 ) -> tuple[ActiveJobOffer, ...]:
     rows = []
-    for offer in offers:
-        published_at = _parse_datetime(offer.created_at)
+    for canonical in offers:
+        offer = canonical.representative
+        published_at = _canonical_date(canonical)
         local_key, _, _ = _local_bucket(offer, department_code)
         commune = _clean_location_value(offer.commune)
         location_label = _clean_location_value(offer.location_label)
+        evidence = tuple(JobOfferEvidence(
+            source=item.source,
+            source_offer_id=item.source_offer_id,
+            source_url=item.source_url,
+            discovery_provider=item.discovery_provider,
+        ) for item in canonical.observations)
+        urls = _sorted_distinct(item.source_url for item in canonical.observations)
+        ids = tuple(sorted(_qualified_offer_id(item) for item in canonical.observations))
+        sources = _sorted_distinct(item.source for item in canonical.observations)
         rows.append((offer, published_at, ActiveJobOffer(
             offer_id=offer.source_offer_id,
             title=offer.title,
@@ -241,11 +279,15 @@ def _active_job_offers(
             location_label=location_label,
             display_location=_display_location(commune, location_label),
             published_at=_format_datetime(published_at),
-            updated_at=_format_datetime(_parse_datetime(offer.updated_at)),
-            contract_type=_clean_location_value(offer.contract_type),
-            salary=_usable_salary(offer.salary),
+            updated_at=_format_datetime(_canonical_updated_date(canonical)),
+            contract_type=_clean_location_value(_canonical_value(canonical, "contract_type")),
+            salary=_usable_salary(_canonical_value(canonical, "salary")),
             source=offer.source,
             source_url=offer.source_url,
+            sources=sources,
+            source_urls=urls,
+            source_offer_ids=ids,
+            evidence=evidence,
             local_key=local_key,
             age_days=(max(int((observed_at - published_at).total_seconds() / 86400), 0) if published_at else None),
         )))
@@ -259,32 +301,36 @@ def _active_job_offers(
 
 
 def _build_local_opportunities(
-    offers: Sequence[ObservedJobOffer], department_code: str
+    offers: Sequence[_CanonicalOffer], department_code: str
 ) -> tuple[LocalOpportunity, ...]:
-    grouped: dict[str, list[ObservedJobOffer]] = {}
+    grouped: dict[str, list[_CanonicalOffer]] = {}
     locations: dict[str, tuple[Optional[str], Optional[str]]] = {}
-    for offer in offers:
+    for canonical in offers:
+        offer = canonical.representative
         local_key, commune, location_label = _local_bucket(offer, department_code)
-        grouped.setdefault(local_key, []).append(offer)
+        grouped.setdefault(local_key, []).append(canonical)
         locations.setdefault(local_key, (commune, location_label))
 
     opportunities: list[LocalOpportunity] = []
     for local_key, local_offers in grouped.items():
         commune, fallback_label = locations[local_key]
+        observations = tuple(
+            observation for item in local_offers for observation in item.observations
+        )
         location_label = next(
-            (_clean_location_value(offer.location_label) for offer in local_offers if _clean_location_value(offer.location_label)),
+            (_clean_location_value(offer.location_label) for offer in observations if _clean_location_value(offer.location_label)),
             fallback_label,
         )
         titles = _representative_distinct(
-            (offer.title, _normalize_text_key(offer.title)) for offer in local_offers
+            (item.representative.title, _normalize_role_key(item.representative.title))
+            for item in local_offers
         )
         dates = [
-            created_at
-            for offer in local_offers
-            if (created_at := _parse_datetime(offer.created_at)) is not None
+            created_at for item in local_offers
+            if (created_at := _canonical_date(item)) is not None
         ]
-        source_offer_ids = tuple(sorted(_qualified_offer_id(offer) for offer in local_offers))
-        source_urls = _sorted_distinct(offer.source_url for offer in local_offers)
+        source_offer_ids = tuple(sorted(_qualified_offer_id(offer) for offer in observations))
+        source_urls = _sorted_distinct(offer.source_url for offer in observations)
         opportunities.append(
             LocalOpportunity(
                 local_key=local_key,
@@ -298,7 +344,7 @@ def _build_local_opportunities(
                 newest_offer_created_at=_format_datetime(max(dates)) if dates else None,
                 source_offer_ids=source_offer_ids,
                 source_urls=source_urls,
-                signals=_local_signals(local_offers, titles),
+                signals=_local_signals(local_offers, observations, titles),
             )
         )
     return tuple(
@@ -334,7 +380,8 @@ def _local_bucket(
 
 
 def _local_signals(
-    offers: Sequence[ObservedJobOffer], titles: tuple[str, ...]
+    offers: Sequence[_CanonicalOffer], observations: Sequence[ObservedJobOffer],
+    titles: tuple[str, ...]
 ) -> tuple[OpportunitySignal, ...]:
     return (
         OpportunitySignal(
@@ -349,10 +396,64 @@ def _local_signals(
         ),
         OpportunitySignal(
             "local_recurrent_observation_signal",
-            any(offer.observation_count >= 2 for offer in offers),
-            f"{sum(offer.observation_count >= 2 for offer in offers)} offre(s) observée(s) dans plusieurs runs dans cette localisation.",
+            any(offer.observation_count >= 2 for offer in observations),
+            f"{sum(offer.observation_count >= 2 for offer in observations)} observation(s) revue(s) dans plusieurs runs dans cette localisation.",
         ),
     )
+
+
+def _canonicalize_offers(
+    offers: Sequence[ObservedJobOffer],
+) -> tuple[_CanonicalOffer, ...]:
+    """Conservatively join corroborating sources without mutating observations."""
+    groups: list[list[ObservedJobOffer]] = []
+    for offer in sorted(offers, key=lambda item: item.id):
+        matching = next((group for group in groups if _can_join_group(offer, group)), None)
+        if matching is None:
+            groups.append([offer])
+        else:
+            matching.append(offer)
+    return tuple(_CanonicalOffer(tuple(group)) for group in groups)
+
+
+def _can_join_group(offer: ObservedJobOffer, group: Sequence[ObservedJobOffer]) -> bool:
+    if any(existing.source == offer.source for existing in group):
+        return False
+    return all(_same_cross_source_need(offer, existing) for existing in group)
+
+
+def _same_cross_source_need(left: ObservedJobOffer, right: ObservedJobOffer) -> bool:
+    if _normalize_role_key(left.title) != _normalize_role_key(right.title):
+        return False
+    left_locations = {_normalize_location_key(value) for value in (left.commune, left.location_label) if _clean_location_value(value)}
+    right_locations = {_normalize_location_key(value) for value in (right.commune, right.location_label) if _clean_location_value(value)}
+    if not left_locations or not right_locations or left_locations.isdisjoint(right_locations):
+        return False
+    left_contract = _normalize_text_key(left.contract_type)
+    right_contract = _normalize_text_key(right.contract_type)
+    if left_contract and right_contract and left_contract != right_contract:
+        return False
+    left_date = _parse_datetime(left.created_at)
+    right_date = _parse_datetime(right.created_at)
+    if left_date and right_date:
+        return abs((left_date - right_date).total_seconds()) <= 21 * 86400
+    return abs((left.first_seen_at - right.first_seen_at).total_seconds()) <= 7 * 86400
+
+
+def _canonical_date(offer: _CanonicalOffer) -> Optional[datetime]:
+    dates = [_parse_datetime(item.created_at) for item in offer.observations]
+    usable = [item for item in dates if item is not None]
+    return min(usable) if usable else None
+
+
+def _canonical_updated_date(offer: _CanonicalOffer) -> Optional[datetime]:
+    dates = [_parse_datetime(item.updated_at) for item in offer.observations]
+    usable = [item for item in dates if item is not None]
+    return max(usable) if usable else None
+
+
+def _canonical_value(offer: _CanonicalOffer, name: str) -> Optional[str]:
+    return next((value for item in offer.observations if (value := getattr(item, name))), None)
 
 
 def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -371,6 +472,15 @@ def _format_datetime(value: Optional[datetime]) -> Optional[str]:
 
 def _normalize_text_key(value: Optional[str]) -> Optional[str]:
     return " ".join(value.casefold().split()) if isinstance(value, str) and value.strip() else None
+
+
+def _normalize_role_key(value: Optional[str]) -> Optional[str]:
+    normalized = _normalize_text_key(value)
+    if not normalized:
+        return None
+    normalized = re.sub(r"\s*[\[(]?\s*(?:h\s*[/.-]\s*f|f\s*[/.-]\s*h|m\s*[/.-]\s*f)\s*[\])]?\s*$", "", normalized)
+    normalized = re.sub(r"[^\w\s]", " ", normalized, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _clean_location_value(value: Optional[str]) -> Optional[str]:
