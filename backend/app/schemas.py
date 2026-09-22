@@ -59,7 +59,9 @@ class SearchRunProgressResponse(BaseModel):
     brave_requests_used: int
     brave_hard_cap: int
     current_company_key: Optional[str]
+    current_company_name: Optional[str]
     current_step: Optional[str]
+    completion_reason: Optional[str]
     created_at: datetime
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
@@ -158,6 +160,7 @@ class ContactPointResponse(BaseModel):
     stale: bool
     evidence: list[ContactProvenanceResponse]
     warnings: list[str] = Field(default_factory=list)
+    commercial_relevance: str = "relevant"
 
 
 class PersonContactResponse(BaseModel):
@@ -188,6 +191,7 @@ class ContactStrategyResponse(BaseModel):
     evidence: list[ContactProvenanceResponse]
     scope: str
     local_key: Optional[str]
+    channel_relevance: str
 
 
 class OfficialWebStatusResponse(BaseModel):
@@ -375,6 +379,9 @@ def _contact_point_response(point, lead) -> ContactPointResponse:
         warnings.append("Coordonnée obsolète ou inactive : vérification requise avant usage.")
     elif point.confidence_level in {"review_needed", "ambiguous"}:
         warnings.append("Coordonnée non recommandée comme canal fiable sans vérification.")
+    relevance = lead.contactability.channel_relevance_by_contact_point_id.get(point.id)
+    if relevance:
+        warnings.extend(relevance.warnings)
     return ContactPointResponse(
         id=point.id,
         type=point.contact_type,
@@ -390,6 +397,7 @@ def _contact_point_response(point, lead) -> ContactPointResponse:
         stale=point.verification_status == "stale" or not point.is_active,
         evidence=_provenance_responses(evidence, point.confidence_level),
         warnings=warnings,
+        commercial_relevance=(relevance.status if relevance else "relevant"),
     )
 
 
@@ -438,6 +446,7 @@ def _strategy_response(lead) -> ContactStrategyResponse:
         evidence=_provenance_responses(rows, strategy.confidence),
         scope=strategy.scope,
         local_key=strategy.local_key,
+        channel_relevance=strategy.channel_relevance,
     )
 
 
@@ -450,7 +459,7 @@ def _contactability_summary(lead) -> ContactabilitySummaryResponse:
     site = sorted(presentable, key=lambda item: (status_priority.get(item.status, 99), -item.score, item.registrable_domain, item.id))[0] if presentable else None
     hidden_candidates = [item for item in candidates if item not in presentable]
     web_warnings = list(site.attribution_warnings or ()) + list(site.rejection_reasons or ()) if site else []
-    if hidden_candidates:
+    if hidden_candidates and site is None:
         web_warnings.append("Aucun site officiel n'a pu être vérifié avec suffisamment de confiance.")
     reasons = [item.code for item in (*lead.scoring.positive_reasons, *lead.scoring.commercial_adjustments)]
     return ContactabilitySummaryResponse(

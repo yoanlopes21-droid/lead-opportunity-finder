@@ -269,7 +269,9 @@ class SearchRun(TimestampedModel, Base):
     configuration_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     configuration_fingerprint: Mapped[Optional[str]] = mapped_column(String(64), index=True)
     current_company_key: Mapped[Optional[str]] = mapped_column(String(500))
+    current_company_name: Mapped[Optional[str]] = mapped_column(String(500))
     current_step: Mapped[Optional[str]] = mapped_column(String(80))
+    completion_reason: Mapped[Optional[str]] = mapped_column(String(80))
 
 
 class SearchRunItem(Base):

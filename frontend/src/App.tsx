@@ -1,51 +1,54 @@
 import { useCallback, useEffect, useState } from 'react'
-import { fetchCommercialLeads } from './api'
-import { BraveUsageWidget } from './components/BraveUsageWidget'
-import { LeadCard } from './components/LeadCard'
-import type { CommercialLeadPage } from './types'
+import { fetchSearchRun } from './api'
+import { Dashboard } from './components/Dashboard'
+import { NewSearch } from './components/NewSearch'
+import { SearchProgress } from './components/SearchProgress'
+import { SearchResults } from './components/SearchResults'
+import type { SearchRun } from './types'
+
+type View = 'dashboard' | 'new-search' | 'progress' | 'results'
+const RUN_STORAGE_KEY = 'lead-opportunity-finder.active-search-run-id'
+
+function storedRunId() {
+  const value = window.localStorage.getItem(RUN_STORAGE_KEY)
+  const id = value ? Number(value) : NaN
+  return Number.isInteger(id) && id > 0 ? id : null
+}
 
 export default function App() {
-  const [page, setPage] = useState<CommercialLeadPage | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const initialRunId = storedRunId()
+  const [view, setView] = useState<View>(initialRunId ? 'progress' : 'dashboard')
+  const [runId, setRunId] = useState<number | null>(initialRunId)
+  const [run, setRun] = useState<SearchRun | null>(null)
 
-  const loadPage = useCallback(async (offset: number) => {
-    setIsLoading(true); setError(null)
-    try { setPage(await fetchCommercialLeads(offset)) }
-    catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Impossible de joindre l’API locale.') }
-    finally { setIsLoading(false) }
+  const rememberRun = useCallback((next: SearchRun) => {
+    setRun(next); setRunId(next.id); window.localStorage.setItem(RUN_STORAGE_KEY, String(next.id))
   }, [])
 
   useEffect(() => {
-    void loadPage(0)
-  }, [loadPage])
+    if (!runId) return
+    fetchSearchRun(runId).then(rememberRun).catch(() => {
+      window.localStorage.removeItem(RUN_STORAGE_KEY); setRunId(null); setRun(null); setView('dashboard')
+    })
+  }, [runId, rememberRun])
 
-  const rangeStart = page && page.total > 0 ? page.offset + 1 : 0
-  const rangeEnd = page ? Math.min(page.offset + page.items.length, page.total) : 0
-  const canGoPrevious = Boolean(page && page.offset > 0)
-  const canGoNext = Boolean(page && page.offset + page.items.length < page.total)
+  function showNewSearch() { setView('new-search') }
+  function openRun() { if (runId) setView('progress'); else setView('new-search') }
 
   return (
     <main className="dashboard">
-      <header className="page-header">
-        <p className="eyebrow">OUTIL LOCAL · OPPORTUNITÉS COMMERCIALES</p><h1>Lead Opportunity Finder</h1>
-        <p className="intro">Priorisez les opportunités commerciales locales à partir de besoins de recrutement observés.</p>
+      <header className="page-header"><div><p className="eyebrow">OUTIL LOCAL · OPPORTUNITÉS COMMERCIALES</p><h1>Lead Opportunity Finder</h1><p className="intro">Priorisez les opportunités commerciales locales à partir de besoins de recrutement observés.</p></div>
+        <button type="button" className="new-search-button" onClick={showNewSearch}>Nouvelle recherche</button>
       </header>
-      <section className="summary-grid" aria-label="Résumé des leads">
-        <article><span>Leads prioritaires</span><strong>{page?.total ?? '—'}</strong><small>résultat de la recherche actuelle</small></article>
-        <article><span>Département</span><strong>94</strong><small>Val-de-Marne</small></article>
-        <article><span>Affichés</span><strong>{page?.items.length ?? '—'}</strong><small>sur cette page</small></article>
-      </section>
-      <BraveUsageWidget />
-      <section className="lead-section" aria-labelledby="lead-list-title"><div className="section-heading"><div><p className="eyebrow">LISTE PRIORISÉE</p><h2 id="lead-list-title">Opportunités à contacter</h2></div>
-        <button type="button" className="refresh-button" onClick={() => void loadPage(page?.offset ?? 0)} disabled={isLoading}>{isLoading && page ? 'Actualisation…' : 'Actualiser'}</button>
-      </div>
-        {isLoading && !page && <div className="state-card" role="status">Chargement des opportunités locales…</div>}
-        {error && <div className="state-card error-state" role="alert"><p>{error}</p><button type="button" onClick={() => void loadPage(page?.offset ?? 0)}>Réessayer</button></div>}
-        {page && !error && page.items.length === 0 && <div className="state-card"><h3>Aucun lead à afficher</h3><p>Aucune opportunité ne correspond à cette recherche pour le moment.</p></div>}
-        {page && !error && page.items.length > 0 && <div className="lead-list">{page.items.map((lead) => <LeadCard key={lead.company_key} lead={lead} />)}</div>}
-      </section>
-      {page && !error && <nav className="pagination" aria-label="Pagination des leads"><button type="button" onClick={() => void loadPage(Math.max(0, page.offset - page.limit))} disabled={!canGoPrevious || isLoading}>Page précédente</button><p>{rangeStart}–{rangeEnd} sur {page.total}</p><button type="button" onClick={() => void loadPage(page.offset + page.limit)} disabled={!canGoNext || isLoading}>Page suivante</button></nav>}
+      <nav className="app-navigation" aria-label="Navigation principale">
+        <button type="button" className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}>Dashboard</button>
+        <button type="button" className={view === 'new-search' ? 'active' : ''} onClick={showNewSearch}>Nouvelle recherche</button>
+        {runId && <button type="button" className={view === 'progress' || view === 'results' ? 'active' : ''} onClick={openRun}>Recherche nº {runId}</button>}
+      </nav>
+      {view === 'dashboard' && <Dashboard />}
+      {view === 'new-search' && <NewSearch activeRun={run} isRestoringRun={Boolean(runId && !run)} onCreated={(next) => { rememberRun(next); setView('progress') }} onOpenRun={openRun} />}
+      {view === 'progress' && runId && <SearchProgress runId={runId} initialRun={run} onRunChange={rememberRun} onResults={() => setView('results')} />}
+      {view === 'results' && runId && <SearchResults runId={runId} run={run} onProgress={() => setView('progress')} />}
     </main>
   )
 }

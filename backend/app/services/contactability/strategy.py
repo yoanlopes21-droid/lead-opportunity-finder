@@ -67,6 +67,7 @@ class ContactStrategy:
     evidence_references: tuple[StrategyEvidenceReference, ...]
     scope: str
     local_key: Optional[str]
+    channel_relevance: str = "relevant"
 
 
 _ROLE_PRIORITY = {

@@ -35,7 +35,28 @@ function ContactValue({ contact }: { contact: ContactPoint }) { const href = hre
 function JobOfferRow({ offer }: { offer: ActiveJobOffer }) {
   const location = offer.display_location ?? 'Localisation non précisée'
   const details = [location, offer.contract_type, fmtDate(offer.published_at)].filter(Boolean)
-  return <li><div><strong>{offer.title}</strong><span>{details.join(' · ') || 'Date non précisée'}{offer.age_days !== null && offer.age_days >= 0 && <> · il y a {offer.age_days} j</>}{offer.salary && <small>Salaire : {offer.salary}</small>}</span></div>{offer.source_url && <a href={offer.source_url} target="_blank" rel="noreferrer">Voir l’offre</a>}</li>
+  const salary = formatSalary(offer.salary)
+  return <li><div><strong>{offer.title}</strong><span>{details.join(' · ') || 'Date non précisée'}{offer.age_days !== null && offer.age_days >= 0 && <> · il y a {offer.age_days} j</>}{salary && <small>Salaire : {salary}</small>}</span></div>{offer.source_url && <a href={offer.source_url} target="_blank" rel="noreferrer">Voir l’offre</a>}</li>
+}
+
+const salaryNumber = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 })
+function formatSalary(value: string | null) {
+  const cleaned = value?.trim()
+  if (!cleaned) return null
+  const franceTravail = cleaned.match(/^(Mensuel|Annuel)\s+de\s+([\d\s]+(?:[.,]\d+)?)\s+Euros(?:\s+à\s+([\d\s]+(?:[.,]\d+)?)\s+Euros)?(?:\s+-\s+(.+))?$/i)
+  const alreadyFormatted = cleaned.match(/^([\d\s]+(?:[.,]\d+)?)\s*€\s*\/\s*(mois|an)(?:\s*·\s*(.+))?$/i)
+  if (!franceTravail && !alreadyFormatted) {
+    const numbers = cleaned.replace(/\s/g, '').match(/\d+(?:[.,]\d+)?/g)
+    if (!numbers || numbers.every((number) => Number(number.replace(',', '.')) === 0)) return null
+    return cleaned
+  }
+  const minimum = Number((franceTravail?.[2] ?? alreadyFormatted?.[1] ?? '').replace(/\s/g, '').replace(',', '.'))
+  const maximum = franceTravail?.[3] ? Number(franceTravail[3].replace(/\s/g, '').replace(',', '.')) : minimum
+  if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || minimum <= 0 || maximum <= 0 || maximum < minimum) return null
+  const amount = minimum === maximum ? salaryNumber.format(minimum) : `${salaryNumber.format(minimum)}–${salaryNumber.format(maximum)}`
+  const period = franceTravail ? (franceTravail[1].toLocaleLowerCase('fr-FR') === 'mensuel' ? 'mois' : 'an') : alreadyFormatted![2].toLocaleLowerCase('fr-FR')
+  const supplement = (franceTravail?.[4] ?? alreadyFormatted?.[3])?.trim().replace(/^./u, (letter) => letter.toLocaleLowerCase('fr-FR'))
+  return `${amount} € / ${period}${supplement ? ` · ${supplement}` : ''}`
 }
 function Person({ person, contacts }: { person: PersonContact; contacts: ContactPoint[] }) {
   const linked = contacts.filter((contact) => person.contact_point_ids.includes(contact.id))
@@ -48,7 +69,7 @@ export function LeadCard({ lead }: LeadCardProps) {
   const contact = lead.contacts.find((item) => item.id === strategy.preferred_contact_point_id)
   const person = lead.people.find((item) => item.id === strategy.preferred_person_contact_id)
   const unresolved = strategy.preferred_channel === 'none'
-  const alternatives = lead.contacts.filter((item) => item.id !== strategy.preferred_contact_point_id && !item.stale && item.verification_status !== 'rejected').filter((item, index, rows) => {
+  const alternatives = lead.contacts.filter((item) => item.id !== strategy.preferred_contact_point_id && !item.stale && item.verification_status !== 'rejected' && ['relevant', 'national_france'].includes(item.commercial_relevance)).filter((item, index, rows) => {
     const source = item.type === 'website' || item.type === 'professional_url' ? (item.value || item.evidence[0]?.source_url) : `${item.type}:${item.value}`
     return rows.findIndex((other) => (other.type === 'website' || other.type === 'professional_url' ? (other.value || other.evidence[0]?.source_url) : `${other.type}:${other.value}`) === source) === index
   })

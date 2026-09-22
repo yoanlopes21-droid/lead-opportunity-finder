@@ -3,9 +3,9 @@ export type ScoreReason = { code: string; message: string; points: number }
 export type ScoreSubscores = { direct_need: number; latent_signals: number; commercial_relevance: number; accessibility: number; evidence_freshness: number }
 
 export type Provenance = { id: number; provider: string; source_url: string | null; source_type: string; observed_at: string; short_excerpt: string | null; confidence: string | null; reason: string | null }
-export type ContactPoint = { id: number; type: string; value: string; scope: string; local_key: string | null; confidence: string; verification_status: string; provider: string | null; person_contact_id: number | null; observed_at: string | null; last_verified_at: string | null; stale: boolean; evidence: Provenance[]; warnings: string[] }
+export type ContactPoint = { id: number; type: string; value: string; scope: string; local_key: string | null; confidence: string; verification_status: string; provider: string | null; person_contact_id: number | null; observed_at: string | null; last_verified_at: string | null; stale: boolean; evidence: Provenance[]; warnings: string[]; commercial_relevance: string }
 export type PersonContact = { id: number; display_name: string; relevance: string; role_title: string | null; scope: string; local_key: string | null; confidence: string; verification_status: string; contact_point_ids: number[]; provenance: Provenance[]; warnings: string[] }
-export type ContactStrategy = { target_type: string; preferred_channel: string; preferred_contact_point_id: number | null; preferred_person_contact_id: number | null; fallback_channels: string[]; confidence: string; rationale_codes: string[]; short_context: string; warnings: string[]; missing_information: string[]; evidence: Provenance[]; scope: string; local_key: string | null }
+export type ContactStrategy = { target_type: string; preferred_channel: string; preferred_contact_point_id: number | null; preferred_person_contact_id: number | null; fallback_channels: string[]; confidence: string; rationale_codes: string[]; short_context: string; warnings: string[]; missing_information: string[]; evidence: Provenance[]; scope: string; local_key: string | null; channel_relevance: string }
 export type LocalOpportunity = { local_key: string; commune: string | null; location_label: string | null; department: string; active_offer_count: number; role_diversity: number; representative_roles: string[]; newest_offer_date: string | null; oldest_offer_date: string | null; source_offer_ids: string[]; source_urls: string[]; signals: OpportunitySignal[]; contact_point_ids: number[]; person_contact_ids: number[] }
 export type ActiveJobOffer = { offer_id: string; title: string; commune: string | null; location_label: string | null; display_location: string | null; published_at: string | null; updated_at: string | null; contract_type: string | null; salary: string | null; source: string; source_url: string | null; local_key: string; age_days: number | null }
 export type OfficialWeb = { verified_site_status: string | null; verified_domain: string | null; verification_score: number; provider: string | null; warnings: string[] }
@@ -21,3 +21,27 @@ export type CommercialLead = {
 
 export type CommercialLeadPage = { items: CommercialLead[]; total: number; limit: number; offset: number }
 export type BraveUsage = { monthly_budget: number; monthly_used: number; monthly_remaining: number; estimated_cost_used_usd: number; estimated_credit_remaining_usd: number; current_period_end: string; days_remaining_in_period: number; status: string }
+
+export type SearchRunStatus = 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed'
+export type SearchRun = {
+  id: number
+  status: SearchRunStatus
+  department: string
+  requested_actionable_leads: number
+  current_actionable_leads: number
+  candidates_considered: number
+  candidates_enriched: number
+  brave_requests_used: number
+  brave_hard_cap: number
+  current_company_key: string | null
+  current_company_name: string | null
+  current_step: string | null
+  completion_reason: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  error_summary: string | null
+  stop_requested?: boolean
+  configuration_fingerprint?: string | null
+}
+export type SearchRunCreate = { department: '94'; requested_actionable_leads: number; brave_hard_cap: number }

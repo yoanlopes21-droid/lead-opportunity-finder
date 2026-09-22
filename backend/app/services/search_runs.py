@@ -15,9 +15,13 @@ from typing import Callable, Optional, Protocol
 from sqlalchemy import Engine, func, inspect, select
 from sqlalchemy.orm import Session
 
-from app.models import BraveUsageEvent, SearchRun, SearchRunItem
+from app.models import BraveUsageEvent, ObservedJobOffer, SearchRun, SearchRunItem, WebsiteCandidateRecord
 from app.services.commercial_leads.service import CommercialLead, CommercialLeadQuery, list_commercial_leads
+from app.services.contactability.contracts import ContactType, VerificationStatus
+from app.services.contactability.relevance import ChannelRelevance
 from app.services.contactability.strategy import PreferredChannel
+from app.services.contactability.providers.official_web.contracts import WebsiteVerificationStatus
+from app.services.opportunities.company import normalize_company_key
 
 
 class SearchRunStatus:
@@ -39,6 +43,13 @@ class SearchRunItemStatus:
     UNRESOLVED = "unresolved"
     EXCLUDED = "excluded"
     ERROR = "error"
+
+
+class SearchRunCompletionReason:
+    TARGET_REACHED = "target_reached"
+    CANDIDATES_EXHAUSTED = "candidates_exhausted"
+    STOPPED = "stopped"
+    FAILED = "failed"
 
 
 _TERMINAL = {
@@ -89,7 +100,9 @@ class SearchRunProgress:
     brave_requests_used: int
     brave_hard_cap: int
     current_company_key: Optional[str]
+    current_company_name: Optional[str]
     current_step: Optional[str]
+    completion_reason: Optional[str]
     created_at: datetime
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
@@ -114,7 +127,9 @@ def ensure_search_run_schema(engine: Engine) -> None:
             "configuration_snapshot": "JSON DEFAULT '{}'",
             "configuration_fingerprint": "VARCHAR(64)",
             "current_company_key": "VARCHAR(500)",
+            "current_company_name": "VARCHAR(500)",
             "current_step": "VARCHAR(80)",
+            "completion_reason": "VARCHAR(80)",
         }
         with engine.begin() as connection:
             for name, ddl in additions.items():
@@ -130,9 +145,18 @@ def is_actionable_lead(lead: CommercialLead) -> bool:
         return False
     if strategy.preferred_channel == PreferredChannel.NONE:
         return False
-    # Strategies only recommend active, non-stale, non-rejected coordinates.
-    # Requiring provenance prevents a naked name/domain from being counted.
-    return bool(strategy.evidence_references)
+    if strategy.channel_relevance not in {ChannelRelevance.RELEVANT, ChannelRelevance.NATIONAL_FRANCE}:
+        return False
+    point = next((item for item in lead.contactability.contact_points if item.id == strategy.contact_point_id), None)
+    if point is None or not point.is_active:
+        return False
+    if point.verification_status in {VerificationStatus.REJECTED, VerificationStatus.STALE}:
+        return False
+    if point.confidence_level in {"review_needed", "ambiguous"}:
+        return False
+    # Provenance must belong to the selected channel, not merely to another
+    # person or coordinate present on the same lead.
+    return bool(lead.contactability.evidence_by_contact_point_id.get(point.id))
 
 
 class SearchRunOrchestrator:
@@ -166,7 +190,12 @@ class SearchRunOrchestrator:
         leads = list_commercial_leads(session, CommercialLeadQuery(
             department_code=department, include_excluded=True, limit=None,
         ), now=self._clock()).items
-        for position, lead in enumerate(leads):
+        candidate_keys = self._candidate_signal_keys(session)
+        ordered = sorted(
+            enumerate(leads),
+            key=lambda row: (self._priority(row[1], candidate_keys), row[0]),
+        )
+        for position, (_, lead) in enumerate(ordered):
             session.add(SearchRunItem(
                 run_id=run.id, company_key=lead.company_key, company_name_snapshot=lead.company_name,
                 selection_position=position, score_snapshot=lead.scoring.total_score,
@@ -196,15 +225,13 @@ class SearchRunOrchestrator:
         if run.status == SearchRunStatus.STOPPED:
             run.stop_requested = False
         if run.stop_requested:
-            run.status = SearchRunStatus.STOPPED
-            run.finished_at = self._clock()
-            session.commit()
-            return run
+            return self._stop(session, run)
         for item in self._items(session, run.id):
             if item.status == SearchRunItemStatus.PROCESSING:
                 item.status = SearchRunItemStatus.PENDING
                 item.started_at = None
         run.status, run.started_at, run.finished_at = SearchRunStatus.RUNNING, run.started_at or self._clock(), None
+        run.completion_reason = None
         self._sync_counts(session, run)
         session.commit()
 
@@ -212,49 +239,90 @@ class SearchRunOrchestrator:
             # One composed/batched read covers all cached candidates.  We only
             # recompose after an enrichment has actually changed one target.
             leads_by_key = self._leads_by_key(session, run)
+            enrichable_without_discovery = self._enrichable_without_discovery(
+                session, tuple(leads_by_key.values()),
+            ) if run.brave_hard_cap == 0 and isinstance(self._enricher, OfficialWebSearchEnricher) else None
             for item in self._items(session, run.id):
                 session.refresh(run)
                 if run.stop_requested:
                     return self._stop(session, run)
                 if run.current_actionable_leads >= run.requested_actionable_leads:
-                    return self._complete(session, run)
+                    return self._complete(session, run, SearchRunCompletionReason.TARGET_REACHED)
                 if item.status in _TERMINAL or item.status == SearchRunItemStatus.ERROR:
                     continue
-                self._process(session, run, item, leads_by_key.get(item.company_key))
-            return self._complete(session, run)
+                self._process(
+                    session, run, item, leads_by_key.get(item.company_key),
+                    allow_enrichment=(enrichable_without_discovery is None or item.company_key in enrichable_without_discovery),
+                )
+            reason = (
+                SearchRunCompletionReason.TARGET_REACHED
+                if run.current_actionable_leads >= run.requested_actionable_leads
+                else SearchRunCompletionReason.CANDIDATES_EXHAUSTED
+            )
+            return self._complete(session, run, reason)
         except Exception as exc:
             run.status, run.finished_at, run.error_summary = SearchRunStatus.FAILED, self._clock(), str(exc)[:1000]
-            run.current_company_key, run.current_step = None, "failed"
+            run.current_company_key, run.current_company_name, run.current_step = None, None, "failed"
+            run.completion_reason = SearchRunCompletionReason.FAILED
             session.commit()
             return run
 
     def progress(self, session: Session, run_id: int) -> SearchRunProgress:
         run = self._get(session, run_id)
-        self._sync_counts(session, run, commit=False)
-        return SearchRunProgress(**{name: getattr(run, name) for name in SearchRunProgress.__dataclass_fields__})
+        current_actionable_leads: Optional[int] = None
+        if run.status in {SearchRunStatus.COMPLETED, SearchRunStatus.STOPPED, SearchRunStatus.FAILED}:
+            # The persisted count is an audit of the decision at run time.
+            # Terminal UI reads instead use the same current policy as
+            # /results, without changing that historical record.
+            current_actionable_leads = len(self._current_results(session, run))
+        else:
+            self._sync_counts(session, run, commit=False)
+        values = {name: getattr(run, name) for name in SearchRunProgress.__dataclass_fields__}
+        if current_actionable_leads is not None:
+            values["current_actionable_leads"] = current_actionable_leads
+        for name in ("created_at", "started_at", "finished_at"):
+            values[name] = _as_utc(values[name])
+        if values["completion_reason"] is None:
+            values["completion_reason"] = self._legacy_completion_reason(run)
+        return SearchRunProgress(**values)
 
     def results(self, session: Session, run_id: int) -> tuple[CommercialLead, ...]:
         run = self._get(session, run_id)
+        return self._current_results(session, run)
+
+    def _current_results(self, session: Session, run: SearchRun) -> tuple[CommercialLead, ...]:
         actionable = {item.company_key for item in self._items(session, run.id) if item.actionable}
         if not actionable:
             return ()
         leads = list_commercial_leads(session, CommercialLeadQuery(
             department_code=run.department, include_excluded=True, limit=None,
         ), now=self._clock()).items
-        return tuple(lead for lead in leads if lead.company_key in actionable)
+        # The item flag is the historical audit decision. Results are composed
+        # from current facts and current actionable policy, so a newly detected
+        # relevance mismatch is not kept as a usable lead.
+        return tuple(
+            lead for lead in leads
+            if lead.company_key in actionable and is_actionable_lead(lead)
+        )
 
     def _process(
         self, session: Session, run: SearchRun, item: SearchRunItem, lead: Optional[CommercialLead],
+        *, allow_enrichment: bool = True,
     ) -> None:
         if lead is None or not lead.is_eligible or lead.active_offer_count < 1:
             self._finish_item(session, run, item, SearchRunItemStatus.EXCLUDED if lead and not lead.is_eligible else SearchRunItemStatus.SKIPPED)
             return
         item.status, item.started_at = SearchRunItemStatus.PROCESSING, self._clock()
-        run.current_company_key, run.current_step = item.company_key, "reusing_cached_contactability"
+        run.current_company_key, run.current_company_name = item.company_key, item.company_name_snapshot
+        run.current_step = "reusing_cached_contactability"
         session.commit()
         if is_actionable_lead(lead):
             item.reused_cache = True
             self._finish_item(session, run, item, SearchRunItemStatus.ACTIONABLE, actionable=True)
+            return
+        if not allow_enrichment:
+            run.current_step = "no_reusable_web_signal"
+            self._finish_item(session, run, item, SearchRunItemStatus.SKIPPED)
             return
         run.current_step = "official_web_enrichment"
         before = self._brave_used(session, run.id)
@@ -279,7 +347,7 @@ class SearchRunOrchestrator:
         if enriched:
             run.candidates_enriched += 1
         run.candidates_considered += 1
-        run.current_company_key, run.current_step = None, "candidate_finished"
+        run.current_company_key, run.current_company_name, run.current_step = None, None, "candidate_finished"
         self._sync_counts(session, run, commit=False)
         session.commit()
 
@@ -301,6 +369,72 @@ class SearchRunOrchestrator:
         ), now=self._clock()).items}
 
     @staticmethod
+    def _candidate_signal_keys(session: Session) -> set[str]:
+        keys = set(session.scalars(select(WebsiteCandidateRecord.company_key).where(
+            WebsiteCandidateRecord.is_active.is_(True),
+        )))
+        descriptions = session.execute(select(
+            ObservedJobOffer.company_name, ObservedJobOffer.description,
+        ).where(
+            ObservedJobOffer.is_active.is_(True),
+            ObservedJobOffer.description.is_not(None),
+        ))
+        keys.update(
+            normalize_company_key(company_name)
+            for company_name, description in descriptions
+            if description and ("http://" in description.casefold() or "https://" in description.casefold())
+        )
+        return keys
+
+    @classmethod
+    def _enrichable_without_discovery(
+        cls, session: Session, leads: tuple[CommercialLead, ...],
+    ) -> set[str]:
+        candidate_keys = cls._candidate_signal_keys(session)
+        return {
+            lead.company_key for lead in leads
+            if cls._has_reusable_web_signal(lead, candidate_keys)
+        }
+
+    @staticmethod
+    def _has_reusable_web_signal(lead: CommercialLead, candidate_keys: set[str]) -> bool:
+        if lead.company_key in candidate_keys:
+            return True
+        if any(
+            item.status == WebsiteVerificationStatus.HIGH_CONFIDENCE
+            for item in lead.contactability.verified_websites
+        ):
+            return True
+        for point in lead.contactability.contact_points:
+            if not point.is_active or point.contact_type != ContactType.WEBSITE:
+                continue
+            evidence = lead.contactability.evidence_by_contact_point_id.get(point.id, ())
+            if any(item.provider in {"offer_description", "societe_com"} for item in evidence):
+                return True
+        return False
+
+    @classmethod
+    def _priority(cls, lead: CommercialLead, candidate_keys: set[str]) -> int:
+        if is_actionable_lead(lead):
+            return 0
+        return 1 if cls._has_reusable_web_signal(lead, candidate_keys) else 2
+
+    @staticmethod
+    def _legacy_completion_reason(run: SearchRun) -> Optional[str]:
+        """Derive a read-only reason for runs created before the field existed."""
+        if run.status == SearchRunStatus.COMPLETED:
+            return (
+                SearchRunCompletionReason.TARGET_REACHED
+                if run.current_actionable_leads >= run.requested_actionable_leads
+                else SearchRunCompletionReason.CANDIDATES_EXHAUSTED
+            )
+        if run.status == SearchRunStatus.STOPPED:
+            return SearchRunCompletionReason.STOPPED
+        if run.status == SearchRunStatus.FAILED:
+            return SearchRunCompletionReason.FAILED
+        return None
+
+    @staticmethod
     def _items(session: Session, run_id: int) -> tuple[SearchRunItem, ...]:
         return tuple(session.scalars(select(SearchRunItem).where(SearchRunItem.run_id == run_id).order_by(SearchRunItem.selection_position)))
 
@@ -318,12 +452,16 @@ class SearchRunOrchestrator:
         return run
 
     def _stop(self, session: Session, run: SearchRun) -> SearchRun:
-        run.status, run.finished_at, run.current_company_key, run.current_step = SearchRunStatus.STOPPED, self._clock(), None, "stopped"
+        run.status, run.finished_at = SearchRunStatus.STOPPED, self._clock()
+        run.current_company_key, run.current_company_name, run.current_step = None, None, "stopped"
+        run.completion_reason = SearchRunCompletionReason.STOPPED
         session.commit()
         return run
 
-    def _complete(self, session: Session, run: SearchRun) -> SearchRun:
-        run.status, run.finished_at, run.current_company_key, run.current_step = SearchRunStatus.COMPLETED, self._clock(), None, "completed"
+    def _complete(self, session: Session, run: SearchRun, reason: str) -> SearchRun:
+        run.status, run.finished_at = SearchRunStatus.COMPLETED, self._clock()
+        run.current_company_key, run.current_company_name, run.current_step = None, None, "completed"
+        run.completion_reason = reason
         self._sync_counts(session, run, commit=False)
         session.commit()
         return run
@@ -331,3 +469,9 @@ class SearchRunOrchestrator:
 
 def _fingerprint(value: dict) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)

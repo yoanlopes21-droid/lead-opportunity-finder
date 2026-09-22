@@ -44,6 +44,9 @@ from app.services.contactability.strategy import (
     StrategyEvidenceReference,
     build_contact_strategy,
 )
+from app.services.contactability.relevance import (
+    ChannelRelevance, ChannelRelevanceAssessment, assess_channel_relevance,
+)
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,7 @@ class ContactabilityFacts:
     evidence_by_contact_point_id: dict[int, tuple[ContactEvidence, ...]] = field(default_factory=dict)
     evidence_by_person_contact_id: dict[int, tuple[ContactEvidence, ...]] = field(default_factory=dict)
     verified_websites: tuple[VerifiedWebsiteRecord, ...] = ()
+    channel_relevance_by_contact_point_id: dict[int, ChannelRelevanceAssessment] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -316,13 +320,44 @@ def _attach_contactability(lead: CommercialLead, facts: ContactabilityFacts) -> 
     )
     people = tuple(item for item in facts.people if item.scope == scope and item.is_active and item.verification_status != VerificationStatus.REJECTED)
     points = tuple(item for item in facts.contact_points if item.scope == scope and item.is_active)
-    evidence = _strategy_evidence(facts, people, points)
+    related_domains = tuple(
+        item.registrable_domain for item in facts.verified_websites
+        if item.target_scope == scope and item.local_key is None and item.status != "rejected"
+    )
+    assessments = {
+        item.id: assess_channel_relevance(
+            item, facts.evidence_by_contact_point_id.get(item.id, ()),
+            related_domains=related_domains,
+        )
+        for item in points
+    }
+    recommended_points = tuple(
+        item for item in points
+        if assessments[item.id].status in {ChannelRelevance.RELEVANT, ChannelRelevance.NATIONAL_FRANCE}
+    )
+    evidence = _strategy_evidence(facts, people, recommended_points)
     strategy = build_contact_strategy(
-        target, people, points,
+        target, people, recommended_points,
         employee_range=lead.employee_range,
         recruitment_context=lead.representative_job_titles,
         evidence_references=evidence,
     )
+    selected_assessment = assessments.get(strategy.contact_point_id) if strategy.contact_point_id else None
+    geography_warnings = [
+        warning for assessment in assessments.values()
+        if assessment.status not in {ChannelRelevance.RELEVANT}
+        for warning in assessment.warnings
+    ]
+    strategy = replace(
+        strategy,
+        channel_relevance=(selected_assessment.status if selected_assessment else ChannelRelevance.RELEVANT),
+        warnings=tuple(dict.fromkeys((*strategy.warnings, *geography_warnings))),
+        rationale_codes=tuple(dict.fromkeys((
+            *strategy.rationale_codes,
+            *(selected_assessment.rationale_codes if selected_assessment else ()),
+        ))),
+    )
+    facts = replace(facts, channel_relevance_by_contact_point_id=assessments)
     return replace(lead, contactability=facts, contact_strategy=strategy)
 
 

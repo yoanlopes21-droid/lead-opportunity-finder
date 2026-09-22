@@ -19,6 +19,8 @@ from app.services.contactability.persistence import (
     upsert_person_contact,
 )
 from app.services.contactability.providers.official_web.contracts import WebsiteVerificationStatus
+from app.services.commercial_leads.service import CommercialLeadQuery, list_commercial_leads
+from app.services.search_runs import is_actionable_lead
 
 
 NOW = datetime(2026, 9, 20, 10, tzinfo=timezone.utc)
@@ -210,6 +212,76 @@ def test_site_summary_hides_stale_and_obvious_third_party_hypotheses(client, ses
     visible = item_for(client, "PLAUSIBLE")["contactability_summary"]["official_web"]
     assert visible["verified_site_status"] == "ambiguous"
     assert visible["verified_domain"] == "plausible.test"
+
+
+def test_verified_site_summary_does_not_also_claim_no_site_was_verified(client, session):
+    offer(session, "coherent", "COHERENT")
+    for suffix, domain, status in (
+        ("good", "coherent.fr", WebsiteVerificationStatus.HIGH_CONFIDENCE),
+        ("hidden", "directory.example", WebsiteVerificationStatus.REJECTED),
+    ):
+        session.add(VerifiedWebsiteRecord(
+            company_key="coherent", target_scope=ContactScope.COMPANY, local_key=None,
+            target_fingerprint="target-coherent", candidate_fingerprint=f"candidate-{suffix}",
+            candidate_set_fingerprint="set-coherent", provider="official_web",
+            canonical_url=f"https://{domain}", registrable_domain=domain, status=status,
+            score=95 if status == WebsiteVerificationStatus.HIGH_CONFIDENCE else 0,
+            rejection_reasons=[] if status == WebsiteVerificationStatus.HIGH_CONFIDENCE else ["tiers"],
+            attribution_warnings=[], observed_at=NOW, verified_at=NOW,
+            fresh_until=NOW + timedelta(days=30), fingerprint=f"site-coherent-{suffix}",
+        ))
+    session.commit()
+
+    website = item_for(client, "COHERENT")["contactability_summary"]["official_web"]
+    assert website["verified_site_status"] == "high_confidence"
+    assert website["verified_domain"] == "coherent.fr"
+    assert not any("Aucun site officiel" in warning for warning in website["warnings"])
+
+
+def test_foreign_group_channels_are_kept_but_not_recommended_for_france(client, session):
+    offer(session, "lidl", "LIDL")
+    email = point(session, "lidl", ContactType.EMAIL, "recruiting@lidl.us")
+    evidence(session, contact_point_id=email.id, url="https://careers.lidl.co.uk/contact", reason="recruitment contact")
+    session.add(VerifiedWebsiteRecord(
+        company_key="lidl", target_scope=ContactScope.COMPANY, local_key=None,
+        target_fingerprint="target-lidl", candidate_fingerprint="candidate-lidl",
+        candidate_set_fingerprint="set-lidl", provider="official_web",
+        canonical_url="https://lidl.co.uk", registrable_domain="lidl.co.uk",
+        status=WebsiteVerificationStatus.HIGH_CONFIDENCE, score=95, rejection_reasons=[],
+        attribution_warnings=[], observed_at=NOW, verified_at=NOW,
+        fresh_until=NOW + timedelta(days=30), fingerprint="site-lidl",
+    ))
+    session.commit()
+
+    lead = item_for(client, "LIDL")
+    contact = next(item for item in lead["contacts"] if item["id"] == email.id)
+    assert contact["commercial_relevance"] == "irrelevant_foreign"
+    assert contact["verification_status"] == "source_verified"
+    assert lead["contact_strategy"]["preferred_channel"] == "none"
+    assert any("entité étrangère" in warning for warning in lead["contact_strategy"]["warnings"])
+    composed = next(item for item in list_commercial_leads(
+        session, CommercialLeadQuery(limit=200), now=NOW,
+    ).items if item.company_name == "LIDL")
+    assert not is_actionable_lead(composed)
+
+
+def test_explicit_french_national_recruitment_channel_remains_recommended(client, session):
+    offer(session, "apef", "APEF")
+    phone = point(session, "apef", ContactType.PHONE, "+33467153143")
+    evidence(
+        session, contact_point_id=phone.id, url="https://apefrecrute.fr/contact",
+        reason="contact recrutement France",
+    )
+    session.commit()
+
+    lead = item_for(client, "APEF")
+    assert lead["contact_strategy"]["preferred_contact_point_id"] == phone.id
+    assert lead["contact_strategy"]["channel_relevance"] == "national_france"
+    assert any("national ou groupe" in warning for warning in lead["contact_strategy"]["warnings"])
+    composed = next(item for item in list_commercial_leads(
+        session, CommercialLeadQuery(limit=200), now=NOW,
+    ).items if item.company_name == "APEF")
+    assert is_actionable_lead(composed)
 
 
 def test_contactability_loader_uses_bounded_selects_for_many_leads(client, session):
