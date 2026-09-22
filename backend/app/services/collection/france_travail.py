@@ -80,8 +80,8 @@ class FranceTravailDepartmentCollector:
         )
         if run.status == CollectionRunStatus.QUEUED:
             run.status = CollectionRunStatus.RUNNING
-        session.commit()
         run_id = run.id
+        session.commit()
 
         try:
             expected_offset: int | None = 0
@@ -173,8 +173,8 @@ class FranceTravailCompleteDepartmentCollector:
         )
         if run.status == CollectionRunStatus.QUEUED:
             run.status = CollectionRunStatus.RUNNING
-        session.commit()
         run_id = run.id
+        session.commit()
         initial_window = CreationDateWindow(
             datetime(1970, 1, 1, tzinfo=timezone.utc), self._now_provider()
         )
@@ -214,19 +214,21 @@ class FranceTravailCompleteDepartmentCollector:
             offset=0, limit=self._page_size, creation_window=window
         )
         self._pages_processed += 1
-        run.pages_processed += 1
         if first_page.total_count is None:
             raise FranceTravailOffersError(
                 "France Travail did not provide a total for a creation-date window."
             )
         if first_page.total_count > MAX_RESULTS_PER_QUERY:
+            # Persist progress before recursively issuing another network call.
+            # No SQLite transaction remains open while France Travail responds.
+            run.pages_processed += 1
+            session.commit()
             left, right = window.split_inclusively()
             self._collect_window(session, run, left, depth + 1)
             self._collect_window(session, run, right, depth + 1)
             return
 
         self._temporal_windows += 1
-        run.temporal_windows += 1
         for index, page in enumerate(
             self._client.iter_department_pages(
                 page_size=self._page_size,
@@ -234,7 +236,10 @@ class FranceTravailCompleteDepartmentCollector:
                 initial_page=first_page,
             )
         ):
-            if index:
+            if index == 0:
+                run.pages_processed += 1
+                run.temporal_windows += 1
+            else:
                 self._pages_processed += 1
                 run.pages_processed += 1
             FranceTravailDepartmentCollector._validate_page(page, page.offset)

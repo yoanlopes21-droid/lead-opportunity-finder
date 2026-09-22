@@ -4,6 +4,11 @@ import type { CommercialLeadPage, JobOfferRefreshRun } from '../types'
 import { BraveUsageWidget } from './BraveUsageWidget'
 import { LeadCard } from './LeadCard'
 
+function timestamp(value: string) {
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)
+  return new Date(hasTimezone ? value : `${value}Z`).getTime()
+}
+
 export function Dashboard() {
   const [page, setPage] = useState<CommercialLeadPage | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -25,13 +30,23 @@ export function Dashboard() {
 
   useEffect(() => {
     if (!refreshRun || !refreshing) return
-    const timer = window.setInterval(() => {
-      fetchJobOfferRefreshRun(refreshRun.id).then((next) => {
+    let cancelled = false
+    let timer: number
+    const poll = async () => {
+      try {
+        const next = await fetchJobOfferRefreshRun(refreshRun.id)
+        if (cancelled) return
         setRefreshRun(next)
+        setRefreshError(null)
         if (next.status === 'completed') void loadPage(0)
-      }).catch((requestError) => setRefreshError(requestError instanceof Error ? requestError.message : 'Impossible de suivre la mise à jour.'))
-    }, 700)
-    return () => window.clearInterval(timer)
+      } catch {
+        if (!cancelled) setRefreshError('La progression est temporairement indisponible. Nouvelle tentative automatique…')
+      } finally {
+        if (!cancelled) timer = window.setTimeout(() => void poll(), 1200)
+      }
+    }
+    timer = window.setTimeout(() => void poll(), 700)
+    return () => { cancelled = true; window.clearTimeout(timer) }
   }, [refreshRun, refreshing, loadPage])
 
   async function startRefresh() {
@@ -41,11 +56,12 @@ export function Dashboard() {
     try {
       const run = await createJobOfferRefreshRun()
       setRefreshRun(run)
-    } catch (requestError) { setRefreshError(requestError instanceof Error ? requestError.message : 'Impossible de démarrer la mise à jour.') }
+    } catch { setRefreshError('Impossible de démarrer la mise à jour. Vérifiez que l’API locale est disponible.') }
     finally { refreshStartInFlight.current = false }
   }
 
-  const elapsed = refreshRun ? Math.max(0, Math.floor((Date.now() - new Date(refreshRun.started_at).getTime()) / 1000)) : 0
+  const elapsedEnd = refreshRun?.finished_at ? timestamp(refreshRun.finished_at) : Date.now()
+  const elapsed = refreshRun ? Math.max(0, Math.floor((elapsedEnd - timestamp(refreshRun.started_at)) / 1000)) : 0
   const elapsedLabel = `${Math.floor(elapsed / 60)} min ${String(elapsed % 60).padStart(2, '0')} s`
 
   const rangeStart = page && page.total > 0 ? page.offset + 1 : 0
@@ -73,7 +89,7 @@ export function Dashboard() {
         <div><dt>Nouvelles offres</dt><dd>{refreshRun.offers_new}</dd></div><div><dt>Offres mises à jour</dt><dd>{refreshRun.offers_updated}</dd></div>
         <div><dt>Offres désactivées</dt><dd>{refreshRun.offers_deactivated}</dd></div><div><dt>Fenêtres traitées</dt><dd>{refreshRun.temporal_windows}</dd></div>
       </dl>}
-      {refreshRun?.status === 'completed' && <p className="refresh-result">{refreshRun.active_offer_count ?? 0} offres actives · {refreshRun.active_opportunity_count ?? 0} opportunités actives après recomposition.</p>}
+      {refreshRun?.status === 'completed' && <p className="refresh-result">{refreshRun.active_offer_count ?? '—'} offres actives · {refreshRun.active_opportunity_count ?? '—'} opportunités actives après recomposition.</p>}
       {refreshRun?.status === 'failed' && refreshRun.error_summary && <p className="inline-error" role="alert">{refreshRun.error_summary}</p>}
     </section>
     <section className="lead-section" aria-labelledby="lead-list-title"><div className="section-heading"><div><p className="eyebrow">LISTE PRIORISÉE</p><h2 id="lead-list-title">Opportunités à contacter</h2></div>

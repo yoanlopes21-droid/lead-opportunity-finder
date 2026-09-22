@@ -98,6 +98,22 @@ def test_oversized_subwindow_is_split_recursively(session):
     assert result.offers_new == 3
 
 
+def test_no_database_transaction_is_held_during_temporal_network_calls(session):
+    initial, left, right = _split_windows()
+    totals = {_key(initial): MAX_RESULTS_PER_QUERY + 1, _key(left): 0, _key(right): 1}
+
+    class TransactionCheckingClient(FakeTemporalClient):
+        def search_department_page(self, offset, limit, creation_window):
+            assert session.in_transaction() is False
+            return super().search_department_page(offset, limit, creation_window)
+
+    result = _collector(TransactionCheckingClient(
+        totals, {_key(right): (_offer("current"),)},
+    )).collect(session)
+
+    assert result.status == "completed"
+
+
 def test_empty_subwindow_is_valid_and_does_not_block_complete_scope(session):
     initial, left, right = _split_windows()
     totals = {

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.config import get_settings
-from app.database import Base, engine
+from app.database import Base, SessionLocal, engine
 from app import models  # noqa: F401 - registers metadata
 from app.api.commercial_leads import router as commercial_leads_router
 from app.api.brave_usage import router as brave_usage_router
@@ -15,6 +15,7 @@ from app.api.search_runs import router as search_runs_router
 from app.api.job_offer_refresh_runs import router as job_offer_refresh_runs_router
 from app.services.search_runs import ensure_search_run_schema
 from app.services.persistence.offers import ensure_collection_run_schema
+from app.services.job_offer_refresh_runs import recover_orphaned_refresh_runs
 from app.schemas import AppSummary, FranceTravailAuthCheckResponse, HealthResponse
 from app.services.france_travail.auth import FranceTravailAuthError, FranceTravailOAuthClient
 
@@ -27,6 +28,8 @@ async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_search_run_schema(engine)
     ensure_collection_run_schema(engine)
+    with SessionLocal() as session:
+        recover_orphaned_refresh_runs(session)
     yield
 
 

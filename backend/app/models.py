@@ -77,6 +77,8 @@ class CollectionRun(Base):
     temporal_windows: Mapped[int] = mapped_column(Integer, default=0)
     pages_processed: Mapped[int] = mapped_column(Integer, default=0)
     error_summary: Mapped[Optional[str]] = mapped_column(String(1000))
+    active_offer_count: Mapped[Optional[int]] = mapped_column(Integer)
+    active_opportunity_count: Mapped[Optional[int]] = mapped_column(Integer)
 
 
 class ObservedJobOffer(Base):

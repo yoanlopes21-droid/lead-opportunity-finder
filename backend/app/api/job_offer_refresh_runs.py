@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -16,30 +17,31 @@ from app.database import SessionLocal, get_db
 from app.models import CollectionRun
 from app.schemas import JobOfferRefreshRunResponse
 from app.services.collection.france_travail import FRANCE_TRAVAIL_SOURCE
-from app.services.job_offer_refresh_runs import active_offer_count, create_or_get_active_refresh_run, run_refresh
-from app.services.commercial_leads.service import CommercialLeadQuery, list_commercial_leads
+from app.services.job_offer_refresh_runs import create_or_get_active_refresh_run, run_refresh
 from app.services.persistence.offers import CollectionRunStatus
 
 
 router = APIRouter(prefix="/api/v1/job-offer-refresh-runs", tags=["job offer refresh runs"])
 
 
-def _response(session: Session, run: CollectionRun) -> JobOfferRefreshRunResponse:
-    active_offers = None
-    active_opportunities = None
-    if run.status == CollectionRunStatus.COMPLETED:
-        active_offers = active_offer_count(session)
-        active_opportunities = list_commercial_leads(session, CommercialLeadQuery(
-            department_code="94", include_excluded=False, limit=1, offset=0,
-        )).total
+def _response(run: CollectionRun) -> JobOfferRefreshRunResponse:
     return JobOfferRefreshRunResponse(
-        id=run.id, status=run.status, started_at=run.started_at, finished_at=run.finished_at,
+        id=run.id, status=run.status, started_at=_as_utc(run.started_at),
+        finished_at=_as_utc(run.finished_at),
         offers_received=run.offers_received, offers_new=run.offers_new, offers_updated=run.offers_updated,
         offers_unchanged=run.offers_unchanged, offers_skipped=run.offers_skipped,
         offers_deactivated=run.offers_deactivated, temporal_windows=run.temporal_windows,
-        pages_processed=run.pages_processed, active_offer_count=active_offers,
-        active_opportunity_count=active_opportunities, error_summary=run.error_summary,
+        pages_processed=run.pages_processed, active_offer_count=run.active_offer_count,
+        active_opportunity_count=run.active_opportunity_count, error_summary=run.error_summary,
     )
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _background_refresh(run_id: int) -> None:
@@ -52,7 +54,7 @@ def create_refresh_run(background_tasks: BackgroundTasks, session: Session = Dep
     run, created = create_or_get_active_refresh_run(session)
     if created:
         background_tasks.add_task(_background_refresh, run.id)
-    return _response(session, run)
+    return _response(run)
 
 
 @router.get("/active", response_model=Optional[JobOfferRefreshRunResponse])
@@ -63,7 +65,7 @@ def get_active_refresh_run(session: Session = Depends(get_db)) -> Optional[JobOf
                CollectionRun.status.in_((CollectionRunStatus.QUEUED, CollectionRunStatus.RUNNING)))
         .order_by(CollectionRun.id.desc())
     )
-    return _response(session, run) if run is not None else None
+    return _response(run) if run is not None else None
 
 
 @router.get("/{run_id}", response_model=JobOfferRefreshRunResponse)
@@ -71,7 +73,7 @@ def get_refresh_run(run_id: int, session: Session = Depends(get_db)) -> JobOffer
     run = session.get(CollectionRun, run_id)
     if run is None or run.source != FRANCE_TRAVAIL_SOURCE:
         raise HTTPException(status_code=404, detail="job offer refresh run does not exist")
-    return _response(session, run)
+    return _response(run)
 
 
 @router.get("/{run_id}/events")
@@ -84,7 +86,7 @@ async def refresh_run_events(run_id: int) -> StreamingResponse:
                 if run is None or run.source != FRANCE_TRAVAIL_SOURCE:
                     yield 'event: error\ndata: {"detail": "job offer refresh run does not exist"}\n\n'
                     return
-                payload = json.dumps(_response(session, run).model_dump(), default=lambda value: value.isoformat())
+                payload = json.dumps(_response(run).model_dump(), default=lambda value: value.isoformat())
                 if payload != last:
                     yield f"event: progress\ndata: {payload}\n\n"
                     last = payload

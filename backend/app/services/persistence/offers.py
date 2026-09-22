@@ -241,6 +241,8 @@ def ensure_collection_run_schema(engine: Engine) -> None:
         "temporal_windows": "INTEGER NOT NULL DEFAULT 0",
         "pages_processed": "INTEGER NOT NULL DEFAULT 0",
         "error_summary": "VARCHAR(1000)",
+        "active_offer_count": "INTEGER",
+        "active_opportunity_count": "INTEGER",
     }
     with engine.begin() as connection:
         for name, definition in additions.items():
