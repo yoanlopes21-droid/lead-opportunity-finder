@@ -7,13 +7,15 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Callable, Optional
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import inspect, or_, select, text, update
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.models import CollectionRun, ObservedJobOffer
 
 
 class CollectionRunStatus:
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -228,3 +230,19 @@ def _require_running_run(run: CollectionRun) -> None:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def ensure_collection_run_schema(engine: Engine) -> None:
+    """Add progress columns to existing local databases without a migration tool."""
+    if "collection_runs" not in inspect(engine).get_table_names():
+        return
+    existing = {column["name"] for column in inspect(engine).get_columns("collection_runs")}
+    additions = {
+        "temporal_windows": "INTEGER NOT NULL DEFAULT 0",
+        "pages_processed": "INTEGER NOT NULL DEFAULT 0",
+        "error_summary": "VARCHAR(1000)",
+    }
+    with engine.begin() as connection:
+        for name, definition in additions.items():
+            if name not in existing:
+                connection.execute(text(f"ALTER TABLE collection_runs ADD COLUMN {name} {definition}"))

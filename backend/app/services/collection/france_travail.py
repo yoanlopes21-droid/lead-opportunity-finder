@@ -73,13 +73,13 @@ class FranceTravailDepartmentCollector:
         self._page_source = page_source
         self._page_size = page_size
 
-    def collect(self, session: Session) -> FranceTravailCollectionResult:
-        run = create_collection_run(
-            session,
-            source=FRANCE_TRAVAIL_SOURCE,
-            scope_type=DEPARTMENT_SCOPE_TYPE,
+    def collect(self, session: Session, run: CollectionRun | None = None) -> FranceTravailCollectionResult:
+        run = run or create_collection_run(
+            session, source=FRANCE_TRAVAIL_SOURCE, scope_type=DEPARTMENT_SCOPE_TYPE,
             scope_value=VAL_DE_MARNE_DEPARTMENT,
         )
+        if run.status == CollectionRunStatus.QUEUED:
+            run.status = CollectionRunStatus.RUNNING
         session.commit()
         run_id = run.id
 
@@ -91,6 +91,7 @@ class FranceTravailDepartmentCollector:
                 for offer in page.offers:
                     self._validate_offer_scope(offer)
                     upsert_offer(session, run, _to_snapshot(offer))
+                run.pages_processed += 1
                 # A page is a durable progress checkpoint. It prevents a later
                 # remote error from losing valid observations already collected.
                 session.commit()
@@ -106,13 +107,14 @@ class FranceTravailDepartmentCollector:
                 deactivate_unseen=True,
             )
             session.commit()
-        except Exception:
+        except Exception as exc:
             # A persistence error can leave the current transaction invalid.
             # Roll it back first, then record the failed lifecycle state in a
             # fresh transaction.  No offer deactivation is attempted here.
             session.rollback()
             failed_run = session.get(CollectionRun, run_id)
             if failed_run is not None and failed_run.status == CollectionRunStatus.RUNNING:
+                failed_run.error_summary = _safe_error_summary(exc)
                 fail_collection_run(session, failed_run)
                 session.commit()
             raise
@@ -164,13 +166,13 @@ class FranceTravailCompleteDepartmentCollector:
         self._pages_processed = 0
         self._temporal_windows = 0
 
-    def collect(self, session: Session) -> FranceTravailCollectionResult:
-        run = create_collection_run(
-            session,
-            source=FRANCE_TRAVAIL_SOURCE,
-            scope_type=DEPARTMENT_SCOPE_TYPE,
+    def collect(self, session: Session, run: CollectionRun | None = None) -> FranceTravailCollectionResult:
+        run = run or create_collection_run(
+            session, source=FRANCE_TRAVAIL_SOURCE, scope_type=DEPARTMENT_SCOPE_TYPE,
             scope_value=VAL_DE_MARNE_DEPARTMENT,
         )
+        if run.status == CollectionRunStatus.QUEUED:
+            run.status = CollectionRunStatus.RUNNING
         session.commit()
         run_id = run.id
         initial_window = CreationDateWindow(
@@ -185,10 +187,11 @@ class FranceTravailCompleteDepartmentCollector:
                 deactivate_unseen=True,
             )
             session.commit()
-        except Exception:
+        except Exception as exc:
             session.rollback()
             failed_run = session.get(CollectionRun, run_id)
             if failed_run is not None and failed_run.status == CollectionRunStatus.RUNNING:
+                failed_run.error_summary = _safe_error_summary(exc)
                 fail_collection_run(session, failed_run)
                 session.commit()
             raise
@@ -211,6 +214,7 @@ class FranceTravailCompleteDepartmentCollector:
             offset=0, limit=self._page_size, creation_window=window
         )
         self._pages_processed += 1
+        run.pages_processed += 1
         if first_page.total_count is None:
             raise FranceTravailOffersError(
                 "France Travail did not provide a total for a creation-date window."
@@ -222,6 +226,7 @@ class FranceTravailCompleteDepartmentCollector:
             return
 
         self._temporal_windows += 1
+        run.temporal_windows += 1
         for index, page in enumerate(
             self._client.iter_department_pages(
                 page_size=self._page_size,
@@ -231,6 +236,7 @@ class FranceTravailCompleteDepartmentCollector:
         ):
             if index:
                 self._pages_processed += 1
+                run.pages_processed += 1
             FranceTravailDepartmentCollector._validate_page(page, page.offset)
             record_skipped_offers(run, page.skipped_offers)
             for offer in page.offers:
@@ -274,3 +280,9 @@ def _result_from_run(
         temporal_windows=temporal_windows,
         pages_processed=pages_processed,
     )
+
+
+def _safe_error_summary(exc: Exception) -> str:
+    """Keep a useful local failure explanation without exposing configuration."""
+    message = str(exc).strip() or "France Travail collection failed."
+    return message[:1000]

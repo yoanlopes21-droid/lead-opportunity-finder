@@ -1,4 +1,4 @@
-import type { BraveUsage, CommercialLeadPage, SearchRun, SearchRunCreate } from './types'
+import type { BraveUsage, CommercialLeadPage, JobOfferRefreshRun, SearchRun, SearchRunCreate } from './types'
 
 export const API_BASE_URL = 'http://127.0.0.1:8000'
 
@@ -44,4 +44,16 @@ export function resumeSearchRun(id: number): Promise<SearchRun> {
 
 export function fetchSearchRunResults(id: number): Promise<CommercialLeadPage> {
   return readJson<CommercialLeadPage>(`/api/v1/search-runs/${id}/results`)
+}
+
+export function createJobOfferRefreshRun(): Promise<JobOfferRefreshRun> {
+  return readJson<JobOfferRefreshRun>('/api/v1/job-offer-refresh-runs', { method: 'POST' })
+}
+
+export function fetchJobOfferRefreshRun(id: number): Promise<JobOfferRefreshRun> {
+  return readJson<JobOfferRefreshRun>(`/api/v1/job-offer-refresh-runs/${id}`)
+}
+
+export function fetchActiveJobOfferRefreshRun(): Promise<JobOfferRefreshRun | null> {
+  return readJson<JobOfferRefreshRun | null>('/api/v1/job-offer-refresh-runs/active')
 }

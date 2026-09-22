@@ -72,6 +72,11 @@ class CollectionRun(Base):
     offers_unchanged: Mapped[int] = mapped_column(Integer, default=0)
     offers_skipped: Mapped[int] = mapped_column(Integer, default=0)
     offers_deactivated: Mapped[int] = mapped_column(Integer, default=0)
+    # Collection progress is persisted so an interface can reconnect to the
+    # same official-source run without starting a second collection.
+    temporal_windows: Mapped[int] = mapped_column(Integer, default=0)
+    pages_processed: Mapped[int] = mapped_column(Integer, default=0)
+    error_summary: Mapped[Optional[str]] = mapped_column(String(1000))
 
 
 class ObservedJobOffer(Base):

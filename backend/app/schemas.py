@@ -73,6 +73,24 @@ class SearchRunResponse(SearchRunProgressResponse):
     configuration_fingerprint: Optional[str]
 
 
+class JobOfferRefreshRunResponse(BaseModel):
+    id: int
+    status: str
+    started_at: datetime
+    finished_at: Optional[datetime]
+    offers_received: int
+    offers_new: int
+    offers_updated: int
+    offers_unchanged: int
+    offers_skipped: int
+    offers_deactivated: int
+    temporal_windows: int
+    pages_processed: int
+    active_offer_count: Optional[int] = None
+    active_opportunity_count: Optional[int] = None
+    error_summary: Optional[str] = None
+
+
 class OpportunitySignalResponse(BaseModel):
     name: str
     active: bool

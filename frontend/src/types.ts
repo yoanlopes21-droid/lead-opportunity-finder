@@ -45,3 +45,11 @@ export type SearchRun = {
   configuration_fingerprint?: string | null
 }
 export type SearchRunCreate = { department: '94'; requested_actionable_leads: number; brave_hard_cap: number }
+
+export type JobOfferRefreshRunStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type JobOfferRefreshRun = {
+  id: number; status: JobOfferRefreshRunStatus; started_at: string; finished_at: string | null
+  offers_received: number; offers_new: number; offers_updated: number; offers_unchanged: number
+  offers_skipped: number; offers_deactivated: number; temporal_windows: number; pages_processed: number
+  active_offer_count: number | null; active_opportunity_count: number | null; error_summary: string | null
+}
