@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
+from io import BytesIO
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -16,6 +18,12 @@ from app.schemas import (
 )
 from app.services.search_runs import (
     OfficialWebSearchEnricher, SearchRunOrchestrator, ensure_search_run_schema,
+)
+from app.services.commercial_leads.excel_export import (
+    XLSX_MEDIA_TYPE,
+    CommercialExcelItem,
+    build_commercial_xlsx,
+    export_filename,
 )
 
 
@@ -89,6 +97,27 @@ def search_run_results(run_id: int, session: Session = Depends(get_db)) -> Comme
     return CommercialLeadListResponse(
         items=[CommercialLeadResponse.from_lead(lead) for lead in leads],
         total=len(leads), offset=0, limit=len(leads),
+    )
+
+
+@router.get("/{run_id}/export.xlsx")
+def export_search_run_results(
+    run_id: int, session: Session = Depends(get_db)
+) -> StreamingResponse:
+    """Export exactly the currently usable results returned by this SearchRun."""
+    generated_at = datetime.now(timezone.utc)
+    try:
+        leads = SearchRunOrchestrator().results(session, run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    content = build_commercial_xlsx(
+        tuple(CommercialExcelItem(lead=lead) for lead in leads),
+        generated_at=generated_at,
+    )
+    filename = export_filename(generated_at=generated_at, suffix=f"recherche-{run_id}")
+    return StreamingResponse(
+        BytesIO(content), media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createJobOfferRefreshRun, fetchActiveJobOfferRefreshRun, fetchCommercialLeads, fetchJobOfferRefreshRun, fetchJobSourceBoards, fetchLatestOpenWebRun, fetchRecruitmentSignals } from '../api'
+import { createJobOfferRefreshRun, downloadCommercialLeadsExcel, fetchActiveJobOfferRefreshRun, fetchCommercialLeads, fetchJobOfferRefreshRun, fetchJobSourceBoards, fetchLatestOpenWebRun, fetchRecruitmentSignals } from '../api'
 import type { CommercialLeadPage, JobOfferRefreshRun, JobSourceBoard, RecruitmentSignalPage, SourceRefreshRun } from '../types'
 import { BraveUsageWidget } from './BraveUsageWidget'
 import { LeadCard } from './LeadCard'
@@ -14,6 +14,8 @@ export function Dashboard({ onSources, onSignals }: { onSources: () => void; onS
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
   const [refreshRun, setRefreshRun] = useState<JobOfferRefreshRun | null>(null)
   const [refreshError, setRefreshError] = useState<string | null>(null)
   const [boards, setBoards] = useState<JobSourceBoard[]>([])
@@ -65,6 +67,13 @@ export function Dashboard({ onSources, onSignals }: { onSources: () => void; onS
     finally { refreshStartInFlight.current = false }
   }
 
+  async function exportExcel() {
+    setExporting(true); setExportError(null)
+    try { await downloadCommercialLeadsExcel() }
+    catch (requestError) { setExportError(requestError instanceof Error ? requestError.message : 'Impossible de télécharger l’export Excel.') }
+    finally { setExporting(false) }
+  }
+
   const elapsedEnd = refreshRun?.finished_at ? timestamp(refreshRun.finished_at) : Date.now()
   const elapsed = refreshRun ? Math.max(0, Math.floor((elapsedEnd - timestamp(refreshRun.started_at)) / 1000)) : 0
   const elapsedLabel = `${Math.floor(elapsed / 60)} min ${String(elapsed % 60).padStart(2, '0')} s`
@@ -100,8 +109,9 @@ export function Dashboard({ onSources, onSignals }: { onSources: () => void; onS
     </section>
     <section className="multi-source-overview" aria-labelledby="source-overview-title"><div className="section-heading"><div><p className="eyebrow">COUVERTURE MULTI-SOURCE</p><h2 id="source-overview-title">Sources supplémentaires</h2></div><div className="source-actions"><button className="secondary-button" type="button" onClick={onSources}>Gérer les sources</button><button className="secondary-button" type="button" onClick={onSignals}>Examiner les signaux</button></div></div><div className="source-overview-grid"><article><span>Sites carrière / ATS</span><strong>{boards.filter((board) => board.enabled).length}</strong><small>boards actifs · {boards.reduce((total, board) => total + board.active_offer_count, 0)} offres actives</small></article><article><span>Dernier Open Web</span><strong>{openWebRun?.signals_found ?? '—'}</strong><small>signaux · {openWebRun?.brave_requests_used ?? 0} requêtes Brave consommées</small></article><article><span>À examiner</span><strong>{signals ? signals.new_count + signals.review_needed_count : '—'}</strong><small>signaux nouveaux ou incomplets</small></article></div></section>
     <section className="lead-section" aria-labelledby="lead-list-title"><div className="section-heading"><div><p className="eyebrow">LISTE PRIORISÉE</p><h2 id="lead-list-title">Opportunités à contacter</h2></div>
-      <button type="button" className="refresh-button" onClick={() => void loadPage(page?.offset ?? 0)} disabled={isLoading}>{isLoading && page ? 'Actualisation…' : 'Recharger la liste'}</button>
+      <div className="source-actions"><button type="button" className="secondary-button" onClick={() => void exportExcel()} disabled={exporting}>{exporting ? 'Préparation…' : 'Exporter Excel'}</button><button type="button" className="refresh-button" onClick={() => void loadPage(page?.offset ?? 0)} disabled={isLoading}>{isLoading && page ? 'Actualisation…' : 'Recharger la liste'}</button></div>
     </div>
+      {exportError && <p className="inline-error" role="alert">{exportError}</p>}
       {isLoading && !page && <div className="state-card" role="status">Chargement des opportunités locales…</div>}
       {error && <div className="state-card error-state" role="alert"><p>{error}</p><button type="button" onClick={() => void loadPage(page?.offset ?? 0)}>Réessayer</button></div>}
       {page && !error && page.items.length === 0 && <div className="state-card"><h3>Aucun lead à afficher</h3><p>Aucune opportunité ne correspond à cette recherche pour le moment.</p></div>}

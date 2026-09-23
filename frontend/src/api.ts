@@ -15,14 +15,42 @@ async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function downloadXlsx(path: string): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}${path}`)
+  if (!response.ok) {
+    let detail = `L’export Excel a échoué (${response.status}).`
+    try { detail = (await response.json() as { detail?: string }).detail || detail } catch { /* Keep fallback. */ }
+    throw new Error(detail)
+  }
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? 'lead-opportunity-finder.xlsx'
+  const url = URL.createObjectURL(await response.blob())
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 export function fetchCommercialLeads(offset: number, includeExcluded = false): Promise<CommercialLeadPage> {
   const params = new URLSearchParams({ department: '94', include_excluded: String(includeExcluded), limit: '50', offset: String(offset) })
   return readJson<CommercialLeadPage>(`/api/v1/commercial-leads?${params}`)
 }
 
+export function downloadCommercialLeadsExcel(): Promise<void> {
+  return downloadXlsx('/api/v1/commercial-leads/export.xlsx?department=94')
+}
+
 export function fetchRecentCommercialLeads(offset: number, windowHours: number, kind: RecentLeadKind): Promise<RecentCommercialLeadPage> {
   const params = new URLSearchParams({ department: '94', window_hours: String(windowHours), kind, limit: '50', offset: String(offset) })
   return readJson<RecentCommercialLeadPage>(`/api/v1/commercial-leads/recent?${params}`)
+}
+
+export function downloadRecentCommercialLeadsExcel(windowHours: number, kind: RecentLeadKind): Promise<void> {
+  const params = new URLSearchParams({ department: '94', window_hours: String(windowHours), kind })
+  return downloadXlsx(`/api/v1/commercial-leads/recent/export.xlsx?${params}`)
 }
 
 export function fetchCommercialExclusions(filters: { type?: string; status?: string; search?: string } = {}): Promise<CommercialExclusionPage> {
@@ -112,6 +140,10 @@ export function resumeSearchRun(id: number): Promise<SearchRun> {
 
 export function fetchSearchRunResults(id: number): Promise<CommercialLeadPage> {
   return readJson<CommercialLeadPage>(`/api/v1/search-runs/${id}/results`)
+}
+
+export function downloadSearchRunExcel(id: number): Promise<void> {
+  return downloadXlsx(`/api/v1/search-runs/${id}/export.xlsx`)
 }
 
 export function createJobOfferRefreshRun(): Promise<JobOfferRefreshRun> {

@@ -68,6 +68,8 @@ class ActiveJobOffer:
     local_key: str
     age_days: Optional[int]
     first_seen_at: datetime
+    last_seen_at: datetime
+    observation_count: int
 
 
 @dataclass(frozen=True)
@@ -292,6 +294,8 @@ def _active_job_offers(
             local_key=local_key,
             age_days=(max(int((observed_at - published_at).total_seconds() / 86400), 0) if published_at else None),
             first_seen_at=min(_as_utc(item.first_seen_at) for item in canonical.observations),
+            last_seen_at=max(_as_utc(item.last_seen_at) for item in canonical.observations),
+            observation_count=sum(item.observation_count for item in canonical.observations),
         )))
     return tuple(item[2] for item in sorted(
         rows,

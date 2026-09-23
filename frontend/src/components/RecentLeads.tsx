@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { fetchRecentCommercialLeads } from '../api'
+import { downloadRecentCommercialLeadsExcel, fetchRecentCommercialLeads } from '../api'
 import type { RecentCommercialLeadPage, RecentLeadKind } from '../types'
 import { LeadCard } from './LeadCard'
 
@@ -22,6 +22,8 @@ export function RecentLeads() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   const loadPage = useCallback(async (offset: number) => {
     setIsLoading(true); setError(null)
@@ -32,6 +34,13 @@ export function RecentLeads() {
 
   useEffect(() => { void loadPage(0) }, [loadPage])
 
+  async function exportExcel() {
+    setExporting(true); setExportError(null)
+    try { await downloadRecentCommercialLeadsExcel(windowHours, kind) }
+    catch (requestError) { setExportError(requestError instanceof Error ? requestError.message : 'Impossible de télécharger l’export Excel.') }
+    finally { setExporting(false) }
+  }
+
   const windowLabel = windows.find((item) => item.hours === windowHours)?.label ?? `${windowHours} h`
   const rangeStart = page && page.total > 0 ? page.offset + 1 : 0
   const rangeEnd = page ? Math.min(page.offset + page.items.length, page.total) : 0
@@ -40,7 +49,8 @@ export function RecentLeads() {
 
   return <section className="recent-page" aria-labelledby="recent-title">
     {notice && <p className="success-notice" role="status">{notice}</p>}
-    <div className="section-heading"><div><p className="eyebrow">PREMIÈRE DÉTECTION LOCALE</p><h2 id="recent-title">Nouveautés</h2><p className="section-intro">Entreprises et besoins apparus récemment dans la base, toujours classés par score commercial.</p></div><button type="button" className="refresh-button" onClick={() => void loadPage(page?.offset ?? 0)} disabled={isLoading}>{isLoading && page ? 'Actualisation…' : 'Recharger la liste'}</button></div>
+    <div className="section-heading"><div><p className="eyebrow">PREMIÈRE DÉTECTION LOCALE</p><h2 id="recent-title">Nouveautés</h2><p className="section-intro">Entreprises et besoins apparus récemment dans la base, toujours classés par score commercial.</p></div><div className="source-actions"><button type="button" className="secondary-button" onClick={() => void exportExcel()} disabled={exporting}>{exporting ? 'Préparation…' : 'Exporter Excel'}</button><button type="button" className="refresh-button" onClick={() => void loadPage(page?.offset ?? 0)} disabled={isLoading}>{isLoading && page ? 'Actualisation…' : 'Recharger la liste'}</button></div></div>
+    {exportError && <p className="inline-error" role="alert">{exportError}</p>}
     <div className="recent-filters" aria-label="Filtres de nouveauté">
       <div><span>Fenêtre</span>{windows.map((item) => <button type="button" key={item.hours} className={windowHours === item.hours ? 'active' : ''} onClick={() => setWindowHours(item.hours)}>{item.label}</button>)}</div>
       <div><span>Type</span>{kinds.map((item) => <button type="button" key={item.value} className={kind === item.value ? 'active' : ''} onClick={() => setKind(item.value)}>{item.label}</button>)}</div>
