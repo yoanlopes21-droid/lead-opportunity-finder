@@ -29,6 +29,17 @@ export type CommercialLead = {
 }
 
 export type CommercialLeadPage = { items: CommercialLead[]; total: number; limit: number; offset: number }
+export type RecentLeadKind = 'all' | 'new_companies' | 'new_offers'
+export type RecentCommercialLead = CommercialLead & {
+  latest_new_opportunity_at: string
+  new_offer_count_in_window: number
+  is_new_company_in_window: boolean
+  new_offer_ids_in_window: string[]
+}
+export type RecentCommercialLeadPage = {
+  items: RecentCommercialLead[]; total: number; limit: number; offset: number
+  window_hours: number; kind: RecentLeadKind
+}
 export type BraveUsage = { monthly_budget: number; monthly_used: number; monthly_remaining: number; estimated_cost_used_usd: number; estimated_credit_remaining_usd: number; current_period_end: string; days_remaining_in_period: number; status: string }
 
 export type SearchRunStatus = 'queued' | 'running' | 'stopping' | 'stopped' | 'completed' | 'failed'

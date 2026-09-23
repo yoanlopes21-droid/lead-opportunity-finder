@@ -1,4 +1,4 @@
-import type { BraveUsage, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
+import type { BraveUsage, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecentCommercialLeadPage, RecentLeadKind, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
 
 export const API_BASE_URL = 'http://127.0.0.1:8000'
 
@@ -18,6 +18,11 @@ async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
 export function fetchCommercialLeads(offset: number, includeExcluded = false): Promise<CommercialLeadPage> {
   const params = new URLSearchParams({ department: '94', include_excluded: String(includeExcluded), limit: '50', offset: String(offset) })
   return readJson<CommercialLeadPage>(`/api/v1/commercial-leads?${params}`)
+}
+
+export function fetchRecentCommercialLeads(offset: number, windowHours: number, kind: RecentLeadKind): Promise<RecentCommercialLeadPage> {
+  const params = new URLSearchParams({ department: '94', window_hours: String(windowHours), kind, limit: '50', offset: String(offset) })
+  return readJson<RecentCommercialLeadPage>(`/api/v1/commercial-leads/recent?${params}`)
 }
 
 export function fetchCommercialExclusions(filters: { type?: string; status?: string; search?: string } = {}): Promise<CommercialExclusionPage> {

@@ -2,12 +2,17 @@
 
 from typing import Annotated, Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas import CommercialLeadListResponse
-from app.services.commercial_leads.service import CommercialLeadQuery, list_commercial_leads
+from app.schemas import CommercialLeadListResponse, RecentCommercialLeadListResponse
+from app.services.commercial_leads.service import (
+    CommercialLeadQuery,
+    RecentCommercialLeadQuery,
+    list_commercial_leads,
+    list_recent_commercial_leads,
+)
 from app.services.scoring.company import ScoreCategory
 
 
@@ -22,6 +27,28 @@ CategoryQuery = Literal[
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
+
+
+@router.get("/recent", response_model=RecentCommercialLeadListResponse)
+def get_recent_commercial_leads(
+    department: Annotated[str, Query(min_length=1)] = "94",
+    window_hours: Annotated[int, Query()] = 48,
+    kind: Literal["all", "new_companies", "new_offers"] = "all",
+    limit: Annotated[int, Query(gt=0, le=MAX_LIMIT)] = DEFAULT_LIMIT,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    session: Session = Depends(get_db),
+) -> RecentCommercialLeadListResponse:
+    """List recently first-seen canonical needs, still prioritized by score."""
+    if window_hours not in {24, 48, 168, 720}:
+        raise HTTPException(status_code=422, detail="window_hours must be 24, 48, 168, or 720")
+    page = list_recent_commercial_leads(session, RecentCommercialLeadQuery(
+        department_code=department,
+        window_hours=window_hours,
+        kind=kind,
+        offset=offset,
+        limit=limit,
+    ))
+    return RecentCommercialLeadListResponse.from_page(page)
 
 
 @router.get("", response_model=CommercialLeadListResponse)

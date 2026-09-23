@@ -3,7 +3,14 @@ import { createCommercialRelationshipFromLead } from '../api'
 import type { ActiveJobOffer, CommercialLead, ContactPoint, PersonContact, Provenance, ScoreReason } from '../types'
 import { RelationshipModal } from './RelationshipModal'
 
-type LeadCardProps = { lead: CommercialLead; onRelationshipSaved?: (message: string) => void }
+type RecentContext = {
+  latestNewOpportunityAt: string
+  newOfferCount: number
+  isNewCompany: boolean
+  newOfferIds: string[]
+  windowLabel: string
+}
+type LeadCardProps = { lead: CommercialLead; recentContext?: RecentContext; onRelationshipSaved?: (message: string) => void }
 
 const categoryMeta: Record<string, { label: string; tone: string }> = {
   '🔥 priorité très forte': { label: 'Priorité très forte', tone: 'very-high' }, '🟢 bon prospect': { label: 'Bon prospect', tone: 'good' }, '🟠 à surveiller / priorité moyenne': { label: 'À surveiller', tone: 'medium' }, '⚪ faible priorité': { label: 'Faible priorité', tone: 'low' },
@@ -37,12 +44,12 @@ function ProvenanceList({ items }: { items: Provenance[] }) {
   return unique.length ? <ul className="provenance-list">{unique.map((item) => <li key={item.id}><strong>{label(item.provider, providerLabels)}{item.reason && <> — {label(item.reason, reasonLabels)}</>}</strong>{item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">Ouvrir la source</a>}{provenanceDescription(item) && <small>{provenanceDescription(item)}</small>}</li>)}</ul> : <p className="muted">Aucune provenance compacte disponible.</p>
 }
 function ContactValue({ contact }: { contact: ContactPoint }) { const href = hrefFor(contact); return href ? <a href={href} target={contact.type === 'website' || contact.type === 'professional_url' ? '_blank' : undefined} rel="noreferrer">{contact.value}</a> : <span>{contact.value}</span> }
-function JobOfferRow({ offer }: { offer: ActiveJobOffer }) {
+function JobOfferRow({ offer, isNew = false }: { offer: ActiveJobOffer; isNew?: boolean }) {
   const location = offer.display_location ?? 'Localisation non précisée'
   const details = [location, offer.contract_type, fmtDate(offer.published_at)].filter(Boolean)
   const salary = formatSalary(offer.salary)
   const sources = offer.sources.map((source) => jobSourceLabels[source] ?? label(source, {})).join(' · ')
-  return <li><div><strong>{offer.title}</strong><span>{details.join(' · ') || 'Date non précisée'}{offer.age_days !== null && offer.age_days >= 0 && <> · il y a {offer.age_days} j</>}{salary && <small>Salaire : {salary}</small>}<small>Source{offer.sources.length > 1 ? 's' : ''} : {sources}</small></span></div><div>{offer.evidence.filter((item) => item.source_url).map((item) => <a key={`${item.source}:${item.source_offer_id}`} href={item.source_url!} target="_blank" rel="noreferrer">{jobSourceLabels[item.source] ?? 'Voir l’offre'}</a>)}</div></li>
+  return <li><div><strong>{offer.title}{isNew && <span className="new-offer-badge">Nouveau</span>}</strong><span>{details.join(' · ') || 'Date non précisée'}{offer.age_days !== null && offer.age_days >= 0 && <> · il y a {offer.age_days} j</>}{salary && <small>Salaire : {salary}</small>}<small>Source{offer.sources.length > 1 ? 's' : ''} : {sources}</small></span></div><div>{offer.evidence.filter((item) => item.source_url).map((item) => <a key={`${item.source}:${item.source_offer_id}`} href={item.source_url!} target="_blank" rel="noreferrer">{jobSourceLabels[item.source] ?? 'Voir l’offre'}</a>)}</div></li>
 }
 
 const salaryNumber = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 })
@@ -69,7 +76,15 @@ function Person({ person, contacts }: { person: PersonContact; contacts: Contact
   return <article className="person"><strong>{person.display_name}</strong><span>{person.role_title ?? label(person.relevance, targetLabels)} · {label(person.scope, scopeLabels)} · {label(person.confidence, confidenceLabels)}</span>{linked.map((contact) => <ContactValue key={contact.id} contact={contact} />)}{person.warnings.map((warning) => <small key={warning}>{warning}</small>)}<details><summary>Provenance</summary><ProvenanceList items={person.provenance} /></details></article>
 }
 
-export function LeadCard({ lead, onRelationshipSaved }: LeadCardProps) {
+function recencyLabel(value: string) {
+  const hours = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 3_600_000))
+  if (hours < 1) return 'à l’instant'
+  if (hours < 24) return `il y a ${hours} h`
+  const days = Math.floor(hours / 24)
+  return `il y a ${days} jour${days > 1 ? 's' : ''}`
+}
+
+export function LeadCard({ lead, recentContext, onRelationshipSaved }: LeadCardProps) {
   const [showRelationshipModal, setShowRelationshipModal] = useState(false)
   const [quickSaving, setQuickSaving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -99,12 +114,13 @@ export function LeadCard({ lead, onRelationshipSaved }: LeadCardProps) {
   return <article className="lead-card">
     <header className="lead-card-header"><div><p className={`category-badge ${category.tone}`}><span aria-hidden="true">{lead.category.slice(0, 2)}</span> {category.label}</p><h2>{lead.company_name}</h2>{lead.official_name && lead.official_name !== lead.company_name && <p className="official-name">{lead.official_name}</p>}</div><div className="lead-card-tools"><div className="score" aria-label={`Score commercial ${lead.total_score} sur 100`}><small>Score commercial</small><strong>{lead.total_score}</strong><span>/100</span></div><details className="lead-actions"><summary aria-label={`Actions pour ${lead.company_name}`}>•••</summary><div><button type="button" onClick={() => setShowRelationshipModal(true)}>Mettre à jour le suivi commercial</button><button type="button" onClick={() => void markContacted()} disabled={quickSaving}>{quickSaving ? 'Enregistrement…' : 'Marquer comme contacté'}</button></div></details></div></header>
     {actionError && <p className="inline-error" role="alert">{actionError}</p>}
+    {recentContext && <div className="recent-context" aria-label="Contexte de nouveauté"><span>{recentContext.isNewCompany ? `Nouvelle entreprise · ${recentContext.newOfferCount} offre${recentContext.newOfferCount > 1 ? 's' : ''} détectée${recentContext.newOfferCount > 1 ? 's' : ''}` : `${recentContext.newOfferCount} nouvelle${recentContext.newOfferCount > 1 ? 's' : ''} offre${recentContext.newOfferCount > 1 ? 's' : ''} en ${recentContext.windowLabel}`}</span><small>Dernière nouveauté {recencyLabel(recentContext.latestNewOpportunityAt)}</small></div>}
     {!lead.is_eligible && lead.exclusion && <p className="exclusion-note"><strong>Entreprise exclue — {exclusionLabels[lead.exclusion.exclusion_type] ?? 'Exclusion'}.</strong>{lead.exclusion.reason && <> {lead.exclusion.reason}</>}</p>}
     {relationship === 'intermediary' && <p className="relationship-note"><strong>Cabinet / intermédiaire.</strong> Les coordonnées sont celles de l’intermédiaire.</p>}{relationship === 'intermediary_suspected' && <p className="relationship-note warning"><strong>Intermédiaire possible.</strong> Vérifiez la relation employeur avant contact.</p>}
     <dl className="lead-facts"><div><dt>Localisation</dt><dd>{lead.primary_location ?? 'Non précisée'}</dd></div><div><dt>Secteur</dt><dd>{label(lead.entity_sector_type, sectorLabels)}</dd></div>{lead.employee_range && <div><dt>Effectif</dt><dd>{lead.employee_range === 'unknown' ? 'Non précisé' : lead.employee_range}</dd></div>}<div><dt>Offres d’emploi actives</dt><dd>{lead.active_offer_count}</dd></div><div><dt>Diversité de rôles</dt><dd>{lead.role_diversity}</dd></div>{fmtDate(lead.newest_offer_date) && <div><dt>Offre la plus récente</dt><dd>{fmtDate(lead.newest_offer_date)}</dd></div>}</dl>
     {lead.representative_roles.length > 0 && <div className="roles">{lead.representative_roles.slice(0, 4).map((role) => <span key={role}>{role}</span>)}</div>}
     {website.verified_site_status && <p className={`website-status ${website.verified_site_status}`}>{label(website.verified_site_status, webLabels)}{website.verified_domain && <> · {website.verified_domain}</>}{website.warnings[0] && <small>{label(website.warnings[0], reasonLabels)}</small>}</p>}
-    {lead.active_job_offers.length > 0 && <section className="job-offers"><h3>Besoins de recrutement <span>— {lead.active_offer_count} besoin{lead.active_offer_count > 1 ? 's' : ''} actif{lead.active_offer_count > 1 ? 's' : ''}</span></h3><ul>{lead.active_job_offers.slice(0, 3).map((offer) => <JobOfferRow key={`${offer.source}:${offer.offer_id}`} offer={offer} />)}</ul>{lead.active_job_offers.length > 3 && <details><summary>Voir les {lead.active_job_offers.length} besoins</summary><ul>{lead.active_job_offers.slice(3).map((offer) => <JobOfferRow key={`${offer.source}:${offer.offer_id}`} offer={offer} />)}</ul></details>}</section>}
+    {lead.active_job_offers.length > 0 && <section className="job-offers"><h3>Besoins de recrutement <span>— {lead.active_offer_count} besoin{lead.active_offer_count > 1 ? 's' : ''} actif{lead.active_offer_count > 1 ? 's' : ''}</span></h3><ul>{lead.active_job_offers.slice(0, 3).map((offer) => <JobOfferRow key={`${offer.source}:${offer.offer_id}`} offer={offer} isNew={recentContext?.newOfferIds.includes(`${offer.source}:${offer.offer_id}`)} />)}</ul>{lead.active_job_offers.length > 3 && <details><summary>Voir les {lead.active_job_offers.length} besoins</summary><ul>{lead.active_job_offers.slice(3).map((offer) => <JobOfferRow key={`${offer.source}:${offer.offer_id}`} offer={offer} isNew={recentContext?.newOfferIds.includes(`${offer.source}:${offer.offer_id}`)} />)}</ul></details>}</section>}
     {lead.local_opportunities.length > 1 && <section className="local-opportunities"><h3>Implantations / besoins</h3><ul>{lead.local_opportunities.slice(0, 5).map((item) => <li key={item.local_key}>{item.location_label ?? item.commune ?? 'Localité non précisée'} <span>— {item.active_offer_count} offre{item.active_offer_count > 1 ? 's' : ''}</span>{item.contact_point_ids.length > 0 && <small>Coordonnée locale disponible</small>}</li>)}</ul>{lead.local_opportunities.length > 5 && <p>+ {lead.local_opportunities.length - 5} autres localités</p>}<p>Les localités décrivent des besoins observés, pas nécessairement des établissements juridiques.</p></section>}
     <section className={`recommended-contact ${unresolved ? 'unresolved' : ''}`}><div><p className="contact-eyebrow">CONTACT RECOMMANDÉ</p><h3>{unresolved ? 'Aucun canal exploitable identifié' : person?.display_name ?? label(strategy.target_type, targetLabels)}</h3>{!unresolved && <p className="contact-channel">{label(strategy.preferred_channel, channelLabels)}{contact && <> · <ContactValue contact={contact} /></>}</p>}{person?.role_title && <p className="muted">{person.role_title}</p>}<p className="contact-hint">{strategy.short_context}</p></div><div className="contact-meta"><span>{unresolved ? 'À enrichir' : label(strategy.confidence, confidenceLabels)}</span><small>{label(strategy.scope, scopeLabels)}</small></div></section>
     <details className="contact-details"><summary>Pourquoi ce contact ?</summary><div className="contact-detail-grid"><section><h3>Contexte avant contact</h3><p><strong>Cible :</strong> {label(strategy.target_type, targetLabels)}</p><p><strong>Canal :</strong> {label(strategy.preferred_channel, channelLabels)} · {label(strategy.scope, scopeLabels)}</p><p>{strategy.short_context}</p>{strategy.fallback_channels.length > 0 && <p><strong>Alternatives prévues :</strong> {strategy.fallback_channels.map((channel) => label(channel, channelLabels)).join(', ')}</p>}</section><section><h3>Informations à vérifier</h3>{strategy.warnings.length === 0 && strategy.missing_information.length === 0 ? <p className="muted">Aucun point de vigilance signalé.</p> : <ul className="warning-list">{[...strategy.warnings, ...strategy.missing_information].map((message) => <li key={message}>{message}</li>)}</ul>}</section><section><h3>Provenance</h3><ProvenanceList items={strategy.evidence} /></section></div>

@@ -756,3 +756,41 @@ class CommercialLeadListResponse(BaseModel):
             limit=page.limit or page.total_count,
             offset=page.offset,
         )
+
+
+class RecentCommercialLeadResponse(CommercialLeadResponse):
+    latest_new_opportunity_at: datetime
+    new_offer_count_in_window: int
+    is_new_company_in_window: bool
+    new_offer_ids_in_window: list[str]
+
+    @classmethod
+    def from_recent_lead(cls, recent) -> "RecentCommercialLeadResponse":
+        base = CommercialLeadResponse.from_lead(recent.lead)
+        return cls(
+            **base.model_dump(),
+            latest_new_opportunity_at=recent.latest_new_opportunity_at,
+            new_offer_count_in_window=recent.new_offer_count_in_window,
+            is_new_company_in_window=recent.is_new_company_in_window,
+            new_offer_ids_in_window=list(recent.new_offer_ids_in_window),
+        )
+
+
+class RecentCommercialLeadListResponse(BaseModel):
+    items: list[RecentCommercialLeadResponse]
+    total: int
+    limit: int
+    offset: int
+    window_hours: int
+    kind: str
+
+    @classmethod
+    def from_page(cls, page) -> "RecentCommercialLeadListResponse":
+        return cls(
+            items=[RecentCommercialLeadResponse.from_recent_lead(item) for item in page.items],
+            total=page.total_count,
+            limit=page.limit or page.total_count,
+            offset=page.offset,
+            window_hours=page.window_hours,
+            kind=page.kind,
+        )

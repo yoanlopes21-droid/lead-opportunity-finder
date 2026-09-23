@@ -67,6 +67,7 @@ class ActiveJobOffer:
     evidence: tuple["JobOfferEvidence", ...]
     local_key: str
     age_days: Optional[int]
+    first_seen_at: datetime
 
 
 @dataclass(frozen=True)
@@ -290,6 +291,7 @@ def _active_job_offers(
             evidence=evidence,
             local_key=local_key,
             age_days=(max(int((observed_at - published_at).total_seconds() / 86400), 0) if published_at else None),
+            first_seen_at=min(_as_utc(item.first_seen_at) for item in canonical.observations),
         )))
     return tuple(item[2] for item in sorted(
         rows,
@@ -464,6 +466,10 @@ def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _format_datetime(value: Optional[datetime]) -> Optional[str]:

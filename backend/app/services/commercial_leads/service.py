@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -125,6 +125,44 @@ class CommercialLeadPage:
     limit: Optional[int]
 
 
+@dataclass(frozen=True)
+class RecentCommercialLead:
+    lead: CommercialLead
+    latest_new_opportunity_at: datetime
+    new_offer_count_in_window: int
+    is_new_company_in_window: bool
+    new_offer_ids_in_window: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RecentCommercialLeadQuery:
+    department_code: str = "94"
+    window_hours: int = 48
+    kind: Literal["all", "new_companies", "new_offers"] = "all"
+    offset: int = 0
+    limit: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if self.window_hours not in {24, 48, 168, 720}:
+            raise ValueError("window_hours must be one of 24, 48, 168, or 720")
+        if self.kind not in {"all", "new_companies", "new_offers"}:
+            raise ValueError("kind must be all, new_companies, or new_offers")
+        if self.offset < 0:
+            raise ValueError("offset must not be negative")
+        if self.limit is not None and self.limit < 1:
+            raise ValueError("limit must be positive")
+
+
+@dataclass(frozen=True)
+class RecentCommercialLeadPage:
+    items: tuple[RecentCommercialLead, ...]
+    total_count: int
+    offset: int
+    limit: Optional[int]
+    window_hours: int
+    kind: str
+
+
 def list_commercial_leads(
     session: Session,
     query: CommercialLeadQuery = CommercialLeadQuery(),
@@ -133,8 +171,74 @@ def list_commercial_leads(
 ) -> CommercialLeadPage:
     """Build sorted leads from local facts without persisting derived records."""
     observed_at = now or datetime.now(timezone.utc)
+    leads = _compose_commercial_leads(session, query.department_code, observed_at, provider)
+    filtered = [lead for lead in leads if _matches_query(lead, query)]
+    ordered = sorted(filtered, key=lambda item: (-item.scoring.total_score, item.company_name.casefold(), item.company_key))
+    total_count = len(ordered)
+    paged = ordered[query.offset:] if query.limit is None else ordered[query.offset:query.offset + query.limit]
+    paged = _attach_page_contactability(session, paged)
+    return CommercialLeadPage(
+        items=paged, total_count=total_count, offset=query.offset, limit=query.limit
+    )
+
+
+def list_recent_commercial_leads(
+    session: Session,
+    query: RecentCommercialLeadQuery = RecentCommercialLeadQuery(),
+    now: Optional[datetime] = None,
+    provider: str = "dinum",
+) -> RecentCommercialLeadPage:
+    """Read recent canonical needs without changing the historical lead listing."""
+    observed_at = _as_utc(now or datetime.now(timezone.utc))
+    cutoff = observed_at - timedelta(hours=query.window_hours)
+    leads = _compose_commercial_leads(session, query.department_code, observed_at, provider)
+    company_first_seen = _company_first_seen_by_key(session)
+    recent: list[RecentCommercialLead] = []
+    eligibility_query = CommercialLeadQuery(department_code=query.department_code)
+    for lead in leads:
+        if not _matches_query(lead, eligibility_query):
+            continue
+        new_offers = tuple(
+            offer for offer in lead.active_job_offers if _as_utc(offer.first_seen_at) >= cutoff
+        )
+        if not new_offers:
+            continue
+        first_seen = company_first_seen.get(lead.company_key)
+        is_new_company = first_seen is not None and first_seen >= cutoff
+        if query.kind == "new_companies" and not is_new_company:
+            continue
+        if query.kind == "new_offers" and is_new_company:
+            continue
+        recent.append(RecentCommercialLead(
+            lead=lead,
+            latest_new_opportunity_at=max(_as_utc(offer.first_seen_at) for offer in new_offers),
+            new_offer_count_in_window=len(new_offers),
+            is_new_company_in_window=is_new_company,
+            new_offer_ids_in_window=tuple(
+                f"{offer.source}:{offer.offer_id}" for offer in new_offers
+            ),
+        ))
+    recent.sort(key=lambda item: (
+        -item.lead.scoring.total_score,
+        -item.latest_new_opportunity_at.timestamp(),
+        item.lead.company_name.casefold(),
+        item.lead.company_key,
+    ))
+    total_count = len(recent)
+    page = recent[query.offset:] if query.limit is None else recent[query.offset:query.offset + query.limit]
+    attached = _attach_page_contactability(session, [item.lead for item in page])
+    page = [replace(item, lead=lead) for item, lead in zip(page, attached)]
+    return RecentCommercialLeadPage(
+        items=tuple(page), total_count=total_count, offset=query.offset, limit=query.limit,
+        window_hours=query.window_hours, kind=query.kind,
+    )
+
+
+def _compose_commercial_leads(
+    session: Session, department_code: str, observed_at: datetime, provider: str
+) -> list[CommercialLead]:
     aggregation = aggregate_active_company_opportunities(
-        session, department_code=query.department_code, now=observed_at
+        session, department_code=department_code, now=observed_at
     )
     enrichments = {
         row.company_key: row
@@ -150,23 +254,41 @@ def list_commercial_leads(
         CommercialRelationshipRecord.from_model(row)
         for row in session.scalars(select(CommercialRelationship).where(CommercialRelationship.is_active.is_(True)))
     )
-    evidence_by_key = _evidence_by_company_key(session, query.department_code)
-    leads = [
+    evidence_by_key = _evidence_by_company_key(session, department_code)
+    return [
         _build_lead(
             opportunity, enrichments.get(opportunity.company_key), exclusions, relationships,
             evidence_by_key.get(opportunity.company_key, ()), observed_at,
         )
         for opportunity in aggregation.opportunities
     ]
-    filtered = [lead for lead in leads if _matches_query(lead, query)]
-    ordered = sorted(filtered, key=lambda item: (-item.scoring.total_score, item.company_name.casefold(), item.company_key))
-    total_count = len(ordered)
-    paged = ordered[query.offset:] if query.limit is None else ordered[query.offset:query.offset + query.limit]
-    facts_by_key = _contactability_by_company_key(session, (item.company_key for item in paged))
-    paged = tuple(_attach_contactability(item, facts_by_key.get(item.company_key, ContactabilityFacts())) for item in paged)
-    return CommercialLeadPage(
-        items=tuple(paged), total_count=total_count, offset=query.offset, limit=query.limit
+
+
+def _attach_page_contactability(
+    session: Session, leads: list[CommercialLead]
+) -> tuple[CommercialLead, ...]:
+    facts_by_key = _contactability_by_company_key(session, (item.company_key for item in leads))
+    return tuple(
+        _attach_contactability(item, facts_by_key.get(item.company_key, ContactabilityFacts()))
+        for item in leads
     )
+
+
+def _company_first_seen_by_key(session: Session) -> dict[str, datetime]:
+    first_seen: dict[str, datetime] = {}
+    for company_name, observed_at in session.execute(
+        select(ObservedJobOffer.company_name, ObservedJobOffer.first_seen_at)
+    ):
+        company_key = normalize_company_key(company_name)
+        if company_key is None:
+            continue
+        normalized = _as_utc(observed_at)
+        first_seen[company_key] = min(first_seen.get(company_key, normalized), normalized)
+    return first_seen
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
 def _build_lead(

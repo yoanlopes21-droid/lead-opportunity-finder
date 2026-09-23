@@ -7,9 +7,10 @@ import { SearchProgress } from './components/SearchProgress'
 import { SearchResults } from './components/SearchResults'
 import { Sources } from './components/Sources'
 import { RecruitmentSignals } from './components/RecruitmentSignals'
+import { RecentLeads } from './components/RecentLeads'
 import type { SearchRun } from './types'
 
-type View = 'dashboard' | 'new-search' | 'prospection' | 'sources' | 'signals' | 'progress' | 'results'
+type View = 'dashboard' | 'recent' | 'new-search' | 'prospection' | 'sources' | 'signals' | 'progress' | 'results'
 const RUN_STORAGE_KEY = 'lead-opportunity-finder.active-search-run-id'
 
 function storedRunId() {
@@ -45,6 +46,7 @@ export default function App() {
       </header>
       <nav className="app-navigation" aria-label="Navigation principale">
         <button type="button" className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}>Dashboard</button>
+        <button type="button" className={view === 'recent' ? 'active' : ''} onClick={() => setView('recent')}>Nouveautés</button>
         <button type="button" className={view === 'new-search' ? 'active' : ''} onClick={showNewSearch}>Nouvelle recherche</button>
         <button type="button" className={view === 'prospection' ? 'active' : ''} onClick={() => setView('prospection')}>Prospection</button>
         <button type="button" className={view === 'sources' ? 'active' : ''} onClick={() => setView('sources')}>Sources</button>
@@ -52,6 +54,7 @@ export default function App() {
         {runId && <button type="button" className={view === 'progress' || view === 'results' ? 'active' : ''} onClick={openRun}>Recherche nº {runId}</button>}
       </nav>
       {view === 'dashboard' && <Dashboard onSources={() => setView('sources')} onSignals={() => setView('signals')} />}
+      {view === 'recent' && <RecentLeads />}
       {view === 'new-search' && <NewSearch activeRun={run} isRestoringRun={Boolean(runId && !run)} onCreated={(next) => { rememberRun(next); setView('progress') }} onOpenRun={openRun} />}
       {view === 'prospection' && <Prospection />}
       {view === 'sources' && <Sources onSignals={() => setView('signals')} />}
