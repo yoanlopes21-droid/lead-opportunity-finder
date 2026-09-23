@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     brave_search_timeout_seconds: float = 10.0
     brave_search_requests_per_second: float = 1.0
     brave_search_monthly_request_budget: int = 1000
+    brave_search_monthly_reserve: int = 50
     brave_search_default_run_hard_cap: int = 40
     brave_search_estimated_price_per_1000_usd: Decimal = Decimal("5.0")
     brave_search_estimated_monthly_free_credit_usd: Decimal = Decimal("5.0")

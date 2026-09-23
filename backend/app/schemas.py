@@ -91,6 +91,111 @@ class JobOfferRefreshRunResponse(BaseModel):
     error_summary: Optional[str] = None
 
 
+class JobSourceBoardCreateRequest(BaseModel):
+    provider_id: str = Field(min_length=1, max_length=80)
+    display_name: str = Field(min_length=1, max_length=255)
+    board_identifier: str = Field(min_length=1, max_length=2048)
+    company_name_hint: str = Field(min_length=1, max_length=500)
+    enabled: bool = True
+
+
+class JobSourceBoardUpdateRequest(BaseModel):
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    company_name_hint: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    enabled: Optional[bool] = None
+
+
+class JobSourceBoardResponse(BaseModel):
+    id: int
+    provider_id: str
+    display_name: str
+    board_identifier: str
+    company_name_hint: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+    last_refresh_at: Optional[datetime]
+    last_refresh_status: Optional[str]
+    last_error: Optional[str]
+    last_run_id: Optional[int]
+    active_offer_count: int
+    last_offers_received: int = 0
+    last_offers_new: int = 0
+    last_offers_updated: int = 0
+    last_offers_deactivated: int = 0
+    last_duration_seconds: Optional[float] = None
+
+
+class SourceRefreshRunResponse(BaseModel):
+    id: int
+    source: str
+    scope_type: str
+    scope_value: str
+    status: str
+    started_at: datetime
+    finished_at: Optional[datetime]
+    offers_received: int
+    offers_new: int
+    offers_updated: int
+    offers_unchanged: int
+    offers_skipped: int
+    offers_deactivated: int
+    pages_processed: int
+    signals_found: int
+    signals_promoted: int
+    brave_requests_used: int
+    target_signal_count: Optional[int]
+    brave_hard_cap: Optional[int]
+    stop_requested: bool
+    completion_reason: Optional[str]
+    error_summary: Optional[str]
+
+
+class OpenWebRunCreateRequest(BaseModel):
+    target_signal_count: int = Field(default=20, ge=1, le=50)
+    brave_max_requests: int = Field(default=8, ge=1, le=10)
+
+
+class RecruitmentSignalResponse(BaseModel):
+    id: int
+    discovery_provider: str
+    source: str
+    source_url: str
+    domain: Optional[str]
+    page_type: str
+    page_type_label: str
+    title: Optional[str]
+    snippet: Optional[str]
+    company_name: Optional[str]
+    job_title: Optional[str]
+    location_label: Optional[str]
+    commune: Optional[str]
+    department_code: Optional[str]
+    published_at: Optional[str]
+    confidence: Optional[float]
+    detection_reason: Optional[str]
+    extraction: dict
+    status: str
+    promoted_offer_id: Optional[int]
+    first_seen_at: datetime
+    last_seen_at: datetime
+    observation_count: int
+    is_promotable: bool
+    promotion_blockers: list[str]
+
+
+class RecruitmentSignalListResponse(BaseModel):
+    items: list[RecruitmentSignalResponse]
+    total: int
+    new_count: int
+    review_needed_count: int
+
+
+class SignalActionResponse(BaseModel):
+    signal: RecruitmentSignalResponse
+    message: str
+
+
 class OpportunitySignalResponse(BaseModel):
     name: str
     active: bool

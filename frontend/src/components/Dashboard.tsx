@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createJobOfferRefreshRun, fetchActiveJobOfferRefreshRun, fetchCommercialLeads, fetchJobOfferRefreshRun } from '../api'
-import type { CommercialLeadPage, JobOfferRefreshRun } from '../types'
+import { createJobOfferRefreshRun, fetchActiveJobOfferRefreshRun, fetchCommercialLeads, fetchJobOfferRefreshRun, fetchJobSourceBoards, fetchLatestOpenWebRun, fetchRecruitmentSignals } from '../api'
+import type { CommercialLeadPage, JobOfferRefreshRun, JobSourceBoard, RecruitmentSignalPage, SourceRefreshRun } from '../types'
 import { BraveUsageWidget } from './BraveUsageWidget'
 import { LeadCard } from './LeadCard'
 
@@ -9,13 +9,16 @@ function timestamp(value: string) {
   return new Date(hasTimezone ? value : `${value}Z`).getTime()
 }
 
-export function Dashboard() {
+export function Dashboard({ onSources, onSignals }: { onSources: () => void; onSignals: () => void }) {
   const [page, setPage] = useState<CommercialLeadPage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
   const [refreshRun, setRefreshRun] = useState<JobOfferRefreshRun | null>(null)
   const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [boards, setBoards] = useState<JobSourceBoard[]>([])
+  const [openWebRun, setOpenWebRun] = useState<SourceRefreshRun | null>(null)
+  const [signals, setSignals] = useState<RecruitmentSignalPage | null>(null)
   const refreshStartInFlight = useRef(false)
   const refreshing = refreshRun?.status === 'queued' || refreshRun?.status === 'running'
 
@@ -28,6 +31,7 @@ export function Dashboard() {
 
   useEffect(() => { void loadPage(0) }, [loadPage])
   useEffect(() => { void fetchActiveJobOfferRefreshRun().then(setRefreshRun).catch(() => {}) }, [])
+  useEffect(() => { void Promise.all([fetchJobSourceBoards(), fetchLatestOpenWebRun(), fetchRecruitmentSignals()]).then(([nextBoards, nextRun, nextSignals]) => { setBoards(nextBoards); setOpenWebRun(nextRun); setSignals(nextSignals) }).catch(() => {}) }, [])
 
   useEffect(() => {
     if (!refreshRun || !refreshing) return
@@ -94,6 +98,7 @@ export function Dashboard() {
       {refreshRun?.status === 'completed' && <p className="refresh-result">{refreshRun.active_offer_count ?? '—'} offres actives · {refreshRun.active_opportunity_count ?? '—'} opportunités actives après recomposition.</p>}
       {refreshRun?.status === 'failed' && refreshRun.error_summary && <p className="inline-error" role="alert">{refreshRun.error_summary}</p>}
     </section>
+    <section className="multi-source-overview" aria-labelledby="source-overview-title"><div className="section-heading"><div><p className="eyebrow">COUVERTURE MULTI-SOURCE</p><h2 id="source-overview-title">Sources supplémentaires</h2></div><div className="source-actions"><button className="secondary-button" type="button" onClick={onSources}>Gérer les sources</button><button className="secondary-button" type="button" onClick={onSignals}>Examiner les signaux</button></div></div><div className="source-overview-grid"><article><span>Sites carrière / ATS</span><strong>{boards.filter((board) => board.enabled).length}</strong><small>boards actifs · {boards.reduce((total, board) => total + board.active_offer_count, 0)} offres actives</small></article><article><span>Dernier Open Web</span><strong>{openWebRun?.signals_found ?? '—'}</strong><small>signaux · {openWebRun?.brave_requests_used ?? 0} requêtes Brave consommées</small></article><article><span>À examiner</span><strong>{signals ? signals.new_count + signals.review_needed_count : '—'}</strong><small>signaux nouveaux ou incomplets</small></article></div></section>
     <section className="lead-section" aria-labelledby="lead-list-title"><div className="section-heading"><div><p className="eyebrow">LISTE PRIORISÉE</p><h2 id="lead-list-title">Opportunités à contacter</h2></div>
       <button type="button" className="refresh-button" onClick={() => void loadPage(page?.offset ?? 0)} disabled={isLoading}>{isLoading && page ? 'Actualisation…' : 'Recharger la liste'}</button>
     </div>

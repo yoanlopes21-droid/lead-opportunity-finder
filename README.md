@@ -4,7 +4,7 @@ Application locale de qualification de leads commerciaux pour le recrutement dan
 
 ## État de ce socle
 
-Le projet comprend une API FastAPI, une base SQLite locale, une interface React/Vite minimale et les modèles de données initiaux. Aucun moteur de recherche, connecteur externe, enrichissement ou contact automatique n'est inclus.
+Le projet comprend une API FastAPI, une base SQLite locale et une interface React/Vite. Les offres France Travail, les boards employeurs publics Greenhouse/Lever et la découverte Open Web bornée peuvent être lancés manuellement. Les résultats web incomplets restent dans une file de signaux à vérifier. Aucun contact automatique n'est inclus.
 
 ## Démarrage
 

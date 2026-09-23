@@ -84,3 +84,41 @@ h3 { font-size: 1.05rem; }
 .relationship-card.status-refused { border-left-color: #a54d45; --relationship-status-color: #873d37; --relationship-status-bg: #fbeeed; }
 .relationship-card.status-wrong_contact { border-left-color: #70687a; --relationship-status-color: #5e5767; --relationship-status-bg: #f1f0f3; }
 .relationship-card.status-do_not_contact { border-left-color: #7d322d; --relationship-status-color: #6b2824; --relationship-status-bg: #f8eae8; }
+
+.multi-source-overview { margin: 0 0 42px; padding-top: 28px; border-top: 1px solid #dce3dc; }
+.source-overview-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.source-overview-grid article { padding: 18px 20px; border: 1px solid #dfe5df; border-radius: 13px; background: #fff; }
+.source-overview-grid span, .source-overview-grid small { display: block; color: #60716e; font-size: .78rem; }
+.source-overview-grid strong { display: block; margin: 7px 0 3px; color: #173d35; font-size: 1.75rem; }
+.source-actions, .board-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sources-page > .brave-widget { margin: 18px 0 24px; }
+.source-layout { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 18px; align-items: start; }
+.source-card { padding: 24px; border: 1px solid #dce5df; border-radius: 16px; background: #fff; box-shadow: 0 7px 22px #142d2a0a; }
+.source-card h3 { margin: 0 0 17px; font-family: Georgia, "Times New Roman", serif; font-size: 1.45rem; }
+.source-card > p:not(.eyebrow) { color: #5b6d68; line-height: 1.55; }
+.board-form { display: grid; gap: 15px; }
+.board-form label, .source-fields label { display: grid; gap: 6px; color: #2d4540; font-size: .84rem; font-weight: 800; }
+.board-form input, .board-form select, .source-fields input { width: 100%; border: 1px solid #bdc9c1; border-radius: 9px; padding: 10px 11px; background: #fff; color: #183c35; font: inherit; }
+.board-form small { color: #71807c; font-size: .73rem; font-weight: 500; }
+.board-form .primary-button { justify-self: start; }
+.source-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 11px; margin: 20px 0; }
+.source-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 18px 0 0; }
+.source-metrics div { padding: 10px 11px; border-radius: 9px; background: #f1f5f2; }
+.source-metrics dt { color: #65766f; font-size: .65rem; font-weight: 800; text-transform: uppercase; }
+.source-metrics dd { margin: 4px 0 0; color: #24473d; font-size: .84rem; font-weight: 800; overflow-wrap: anywhere; }
+.board-list-section { margin-top: 46px; padding-top: 28px; border-top: 1px solid #dce3dc; }
+.board-list { display: grid; gap: 12px; }
+.board-card { display: grid; grid-template-columns: 1fr auto; gap: 15px 24px; padding: 20px 22px; border: 1px solid #dce5df; border-radius: 14px; background: #fff; }
+.board-card h3 { margin: 7px 0 3px; }.board-card p { margin: 0; color: #60716e; font-size: .82rem; }
+.board-card .source-metrics, .board-card .inline-error { grid-column: 1 / -1; }
+.signal-summary { display: flex; gap: 10px; margin: 0 0 20px; }.signal-summary span { padding: 9px 12px; border-radius: 9px; background: #edf4ef; color: #526963; font-size: .8rem; }.signal-summary strong { color: #173d35; }
+.signal-list { display: grid; gap: 14px; }.signal-card { padding: 22px 24px; border: 1px solid #dce5df; border-radius: 15px; background: #fff; }
+.signal-card header { display: flex; align-items: start; justify-content: space-between; gap: 18px; }.signal-card h3 { margin: 8px 0 4px; font-size: 1.1rem; }.signal-card header p { margin: 0; color: #60716e; font-size: .84rem; }
+.confidence-badge { flex: 0 0 auto; padding: 6px 9px; border-radius: 999px; background: #edf4ef; color: #315e50; font-size: .72rem; font-weight: 800; }
+.signal-badges { display: flex; flex-wrap: wrap; gap: 6px; }.page-type-badge { display: inline-block; padding: 4px 7px; border-radius: 999px; background: #edf0ef; color: #596965; font-size: .7rem; font-weight: 850; }.page-type-badge.individual_job_offer { background: #e5f3e9; color: #1e664b; }.page-type-badge.search_or_listing, .page-type-badge.career_board { background: #fff5dc; color: #805c18; }
+.signal-snippet { margin: 17px 0 0; padding: 12px 14px; border-left: 3px solid #b8cbbd; background: #f5f7f5; color: #4c605b; font-size: .86rem; line-height: 1.5; }
+.signal-details { display: grid; grid-template-columns: 1fr 1fr 2fr 1fr; gap: 14px; margin: 18px 0; }.signal-details dt { color: #6a7875; font-size: .67rem; font-weight: 800; text-transform: uppercase; }.signal-details dd { margin: 4px 0 0; color: #304842; font-size: .81rem; }
+.signal-card footer { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 16px; border-top: 1px solid #e4e9e5; }.signal-card footer a { text-decoration: none; }
+.promotion-blockers { margin: 0 0 14px; padding: 10px 12px; border-radius: 9px; background: #fff7e8; color: #77551b; font-size: .8rem; }
+
+@media (max-width: 720px) { .source-overview-grid, .source-layout { grid-template-columns: 1fr; }.board-card { grid-template-columns: 1fr; }.board-actions { grid-row: auto; }.signal-card header { flex-direction: column; }.signal-details { grid-template-columns: repeat(2, 1fr); }.source-fields { grid-template-columns: 1fr; } }

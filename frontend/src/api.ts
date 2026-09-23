@@ -1,4 +1,4 @@
-import type { BraveUsage, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, JobOfferRefreshRun, SearchRun, SearchRunCreate } from './types'
+import type { BraveUsage, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
 
 export const API_BASE_URL = 'http://127.0.0.1:8000'
 
@@ -119,4 +119,64 @@ export function fetchJobOfferRefreshRun(id: number): Promise<JobOfferRefreshRun>
 
 export function fetchActiveJobOfferRefreshRun(): Promise<JobOfferRefreshRun | null> {
   return readJson<JobOfferRefreshRun | null>('/api/v1/job-offer-refresh-runs/active')
+}
+
+export function fetchJobSourceBoards(): Promise<JobSourceBoard[]> {
+  return readJson<JobSourceBoard[]>('/api/v1/job-source-boards')
+}
+
+export function createJobSourceBoard(input: JobSourceBoardCreate): Promise<JobSourceBoard> {
+  return readJson<JobSourceBoard>('/api/v1/job-source-boards', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  })
+}
+
+export function updateJobSourceBoard(id: number, input: Partial<Pick<JobSourceBoard, 'display_name' | 'company_name_hint' | 'enabled'>>): Promise<JobSourceBoard> {
+  return readJson<JobSourceBoard>(`/api/v1/job-source-boards/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  })
+}
+
+export async function deleteJobSourceBoard(id: number): Promise<void> {
+  const response = await fetch(`${API_BASE_URL}/api/v1/job-source-boards/${id}`, { method: 'DELETE' })
+  if (!response.ok) throw new Error((await response.json() as { detail?: string }).detail || 'Suppression impossible.')
+}
+
+export function refreshJobSourceBoard(id: number): Promise<SourceRefreshRun> {
+  return readJson<SourceRefreshRun>(`/api/v1/job-source-boards/${id}/refresh`, { method: 'POST' })
+}
+
+export function fetchSourceRefreshRun(id: number): Promise<SourceRefreshRun> {
+  return readJson<SourceRefreshRun>(`/api/v1/job-source-boards/runs/${id}`)
+}
+
+export function createOpenWebRun(targetSignalCount: number, braveMaxRequests: number): Promise<SourceRefreshRun> {
+  return readJson<SourceRefreshRun>('/api/v1/open-web-runs', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_signal_count: targetSignalCount, brave_max_requests: braveMaxRequests }),
+  })
+}
+
+export function fetchLatestOpenWebRun(): Promise<SourceRefreshRun | null> {
+  return readJson<SourceRefreshRun | null>('/api/v1/open-web-runs/latest')
+}
+
+export function fetchOpenWebRun(id: number): Promise<SourceRefreshRun> {
+  return readJson<SourceRefreshRun>(`/api/v1/open-web-runs/${id}`)
+}
+
+export function stopOpenWebRun(id: number): Promise<SourceRefreshRun> {
+  return readJson<SourceRefreshRun>(`/api/v1/open-web-runs/${id}/stop`, { method: 'POST' })
+}
+
+export function fetchRecruitmentSignals(status = 'new,review_needed'): Promise<RecruitmentSignalPage> {
+  return readJson<RecruitmentSignalPage>(`/api/v1/recruitment-signals?status=${encodeURIComponent(status)}`)
+}
+
+export function promoteRecruitmentSignal(id: number): Promise<{ message: string }> {
+  return readJson<{ message: string }>(`/api/v1/recruitment-signals/${id}/promote`, { method: 'POST' })
+}
+
+export function dismissRecruitmentSignal(id: number): Promise<{ message: string }> {
+  return readJson<{ message: string }>(`/api/v1/recruitment-signals/${id}/dismiss`, { method: 'POST' })
 }

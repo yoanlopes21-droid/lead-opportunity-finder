@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Callable, Optional
 
-from sqlalchemy import inspect, or_, select, text, update
+from sqlalchemy import func, inspect, or_, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -47,6 +47,7 @@ class OfferSnapshot:
     source_url: Optional[str] = None
     discovery_provider: Optional[str] = None
     origin: Optional[str] = None
+    recruitment_signal_id: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -56,11 +57,20 @@ class RecruitmentSignalSnapshot:
     discovery_provider: str
     source: str
     source_url: str
+    domain: Optional[str] = None
+    page_type: str = "unknown"
     title: Optional[str] = None
     snippet: Optional[str] = None
     company_name: Optional[str] = None
+    job_title: Optional[str] = None
     location_label: Optional[str] = None
+    commune: Optional[str] = None
     department_code: Optional[str] = None
+    published_at: Optional[str] = None
+    confidence: Optional[float] = None
+    detection_reason: Optional[str] = None
+    extraction: Optional[dict] = None
+    status: str = "new"
 
 
 @dataclass(frozen=True)
@@ -83,6 +93,7 @@ _SIGNIFICANT_FIELDS = (
     "source_url",
     "discovery_provider",
     "origin",
+    "recruitment_signal_id",
 )
 
 
@@ -190,16 +201,21 @@ def upsert_recruitment_signal(
     ))
     if signal is None:
         signal = RecruitmentSignal(
-            **snapshot.__dict__, first_seen_at=observed_at, last_seen_at=observed_at,
+            **{**snapshot.__dict__, "extraction": snapshot.extraction or {}},
+            first_seen_at=observed_at, last_seen_at=observed_at,
             observation_count=1, last_seen_run_id=run.id,
         )
         session.add(signal)
+        run.signals_found += 1
     elif signal.last_seen_run_id != run.id:
         for name, value in snapshot.__dict__.items():
-            setattr(signal, name, value)
+            if name == "status" and signal.status in {"promoted", "dismissed"}:
+                continue
+            setattr(signal, name, value if name != "extraction" else (value or {}))
         signal.last_seen_at = observed_at
         signal.observation_count += 1
         signal.last_seen_run_id = run.id
+        run.signals_found += 1
     session.flush()
     return signal
 
@@ -223,8 +239,11 @@ def complete_collection_run(
     _require_running_run(run)
     if deactivate_unseen and not full_scope_completed:
         raise ValueError("only an explicitly complete scope may deactivate unseen offers")
-    if deactivate_unseen and run.offers_received == 0 and not allow_empty_deactivation:
-        raise ValueError("empty collections cannot deactivate offers without explicit approval")
+    if (
+        deactivate_unseen and run.offers_received == 0 and not allow_empty_deactivation
+        and _active_scope_offer_count(session, run) > 0
+    ):
+        raise ValueError("empty collections cannot deactivate existing offers without explicit approval")
 
     run.status = CollectionRunStatus.COMPLETED
     run.finished_at = now or _utc_now()
@@ -273,6 +292,22 @@ def _deactivate_unseen_offers(session: Session, run: CollectionRun) -> int:
     return result.rowcount or 0
 
 
+def _active_scope_offer_count(session: Session, run: CollectionRun) -> int:
+    if run.scope_type == "department":
+        scope_filter = ObservedJobOffer.department_code == run.scope_value
+    elif run.scope_type == "provider_board":
+        scope_filter = ObservedJobOffer.origin == run.scope_value
+    else:
+        return 0
+    return int(session.scalar(
+        select(func.count()).select_from(ObservedJobOffer).where(
+            ObservedJobOffer.source == run.source,
+            scope_filter,
+            ObservedJobOffer.is_active.is_(True),
+        )
+    ) or 0)
+
+
 def _snapshot_values(snapshot: OfferSnapshot) -> dict:
     return {field_name: getattr(snapshot, field_name) for field_name in ("source", "source_offer_id", *_SIGNIFICANT_FIELDS)}
 
@@ -297,6 +332,13 @@ def ensure_collection_run_schema(engine: Engine) -> None:
         "error_summary": "VARCHAR(1000)",
         "active_offer_count": "INTEGER",
         "active_opportunity_count": "INTEGER",
+        "signals_found": "INTEGER NOT NULL DEFAULT 0",
+        "signals_promoted": "INTEGER NOT NULL DEFAULT 0",
+        "brave_requests_used": "INTEGER NOT NULL DEFAULT 0",
+        "target_signal_count": "INTEGER",
+        "brave_hard_cap": "INTEGER",
+        "stop_requested": "BOOLEAN NOT NULL DEFAULT 0",
+        "completion_reason": "VARCHAR(80)",
     }
     with engine.begin() as connection:
         for name, definition in additions.items():
@@ -311,7 +353,43 @@ def ensure_collection_run_schema(engine: Engine) -> None:
                 connection.execute(text(
                     "ALTER TABLE observed_job_offers ADD COLUMN discovery_provider VARCHAR(120)"
                 ))
+            if "recruitment_signal_id" not in offer_columns:
+                connection.execute(text(
+                    "ALTER TABLE observed_job_offers ADD COLUMN recruitment_signal_id INTEGER"
+                ))
             connection.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_observed_job_offers_discovery_provider "
                 "ON observed_job_offers (discovery_provider)"
             ))
+            connection.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_observed_job_offers_recruitment_signal_id "
+                "ON observed_job_offers (recruitment_signal_id)"
+            ))
+    if "recruitment_signals" in inspect(engine).get_table_names():
+        signal_columns = {
+            column["name"] for column in inspect(engine).get_columns("recruitment_signals")
+        }
+        signal_additions = {
+            "domain": "VARCHAR(255)",
+            "page_type": "VARCHAR(40) NOT NULL DEFAULT 'unknown'",
+            "job_title": "VARCHAR(500)",
+            "commune": "VARCHAR(255)",
+            "published_at": "VARCHAR(64)",
+            "confidence": "FLOAT",
+            "detection_reason": "VARCHAR(500)",
+            "extraction": "JSON NOT NULL DEFAULT '{}'",
+            "status": "VARCHAR(30) NOT NULL DEFAULT 'new'",
+            "promoted_offer_id": "INTEGER",
+            "reviewed_at": "DATETIME",
+        }
+        with engine.begin() as connection:
+            for name, definition in signal_additions.items():
+                if name not in signal_columns:
+                    connection.execute(text(
+                        f"ALTER TABLE recruitment_signals ADD COLUMN {name} {definition}"
+                    ))
+            for name in ("domain", "page_type", "job_title", "commune", "status", "promoted_offer_id"):
+                connection.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS ix_recruitment_signals_{name} "
+                    f"ON recruitment_signals ({name})"
+                ))

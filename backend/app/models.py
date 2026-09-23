@@ -79,6 +79,13 @@ class CollectionRun(Base):
     error_summary: Mapped[Optional[str]] = mapped_column(String(1000))
     active_offer_count: Mapped[Optional[int]] = mapped_column(Integer)
     active_opportunity_count: Mapped[Optional[int]] = mapped_column(Integer)
+    signals_found: Mapped[int] = mapped_column(Integer, default=0)
+    signals_promoted: Mapped[int] = mapped_column(Integer, default=0)
+    brave_requests_used: Mapped[int] = mapped_column(Integer, default=0)
+    target_signal_count: Mapped[Optional[int]] = mapped_column(Integer)
+    brave_hard_cap: Mapped[Optional[int]] = mapped_column(Integer)
+    stop_requested: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    completion_reason: Mapped[Optional[str]] = mapped_column(String(80))
 
 
 class ObservedJobOffer(Base):
@@ -107,6 +114,9 @@ class ObservedJobOffer(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     observation_count: Mapped[int] = mapped_column(Integer, default=1)
     last_seen_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("collection_runs.id"), index=True)
+    recruitment_signal_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("recruitment_signals.id"), index=True
+    )
     __table_args__ = (
         UniqueConstraint("source", "source_offer_id", name="uq_observed_job_offer_source_id"),
     )
@@ -120,11 +130,24 @@ class RecruitmentSignal(Base):
     discovery_provider: Mapped[str] = mapped_column(String(120), index=True)
     source: Mapped[str] = mapped_column(String(120), index=True)
     source_url: Mapped[str] = mapped_column(String(2048))
+    domain: Mapped[Optional[str]] = mapped_column(String(255), index=True)
+    page_type: Mapped[str] = mapped_column(String(40), default="unknown", index=True)
     title: Mapped[Optional[str]] = mapped_column(String(500))
     snippet: Mapped[Optional[str]] = mapped_column(Text)
     company_name: Mapped[Optional[str]] = mapped_column(String(500), index=True)
+    job_title: Mapped[Optional[str]] = mapped_column(String(500), index=True)
     location_label: Mapped[Optional[str]] = mapped_column(String(500))
+    commune: Mapped[Optional[str]] = mapped_column(String(255), index=True)
     department_code: Mapped[Optional[str]] = mapped_column(String(10), index=True)
+    published_at: Mapped[Optional[str]] = mapped_column(String(64))
+    confidence: Mapped[Optional[float]] = mapped_column(Float)
+    detection_reason: Mapped[Optional[str]] = mapped_column(String(500))
+    extraction: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(30), default="new", index=True)
+    promoted_offer_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("observed_job_offers.id"), index=True
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     observation_count: Mapped[int] = mapped_column(Integer, default=1)
@@ -134,6 +157,28 @@ class RecruitmentSignal(Base):
     __table_args__ = (
         UniqueConstraint(
             "discovery_provider", "source_url", name="uq_recruitment_signal_provider_url"
+        ),
+    )
+
+
+class JobSourceBoard(TimestampedModel, Base):
+    """One explicitly configured public employer board for a supported ATS."""
+
+    __tablename__ = "job_source_boards"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider_id: Mapped[str] = mapped_column(String(80), index=True)
+    display_name: Mapped[str] = mapped_column(String(255))
+    board_identifier: Mapped[str] = mapped_column(String(255))
+    company_name_hint: Mapped[str] = mapped_column(String(500))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    last_refresh_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_refresh_status: Mapped[Optional[str]] = mapped_column(String(30), index=True)
+    last_error: Mapped[Optional[str]] = mapped_column(String(1000))
+    last_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("collection_runs.id"), index=True)
+    active_offer_count: Mapped[int] = mapped_column(Integer, default=0)
+    __table_args__ = (
+        UniqueConstraint(
+            "provider_id", "board_identifier", name="uq_job_source_board_provider_identifier"
         ),
     )
 

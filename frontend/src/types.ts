@@ -63,6 +63,40 @@ export type JobOfferRefreshRun = {
   active_offer_count: number | null; active_opportunity_count: number | null; error_summary: string | null
 }
 
+export type JobSourceBoard = {
+  id: number; provider_id: 'greenhouse' | 'lever'; display_name: string; board_identifier: string
+  company_name_hint: string; enabled: boolean; created_at: string; updated_at: string
+  last_refresh_at: string | null; last_refresh_status: JobOfferRefreshRunStatus | null
+  last_error: string | null; last_run_id: number | null; active_offer_count: number
+  last_offers_received: number; last_offers_new: number; last_offers_updated: number; last_offers_deactivated: number
+  last_duration_seconds: number | null
+}
+export type JobSourceBoardCreate = {
+  provider_id: 'greenhouse' | 'lever'; display_name: string; board_identifier: string
+  company_name_hint: string; enabled: boolean
+}
+export type SourceRefreshRun = {
+  id: number; source: string; scope_type: string; scope_value: string; status: JobOfferRefreshRunStatus
+  started_at: string; finished_at: string | null; offers_received: number; offers_new: number
+  offers_updated: number; offers_unchanged: number; offers_skipped: number; offers_deactivated: number
+  pages_processed: number; signals_found: number; signals_promoted: number; brave_requests_used: number
+  target_signal_count: number | null; brave_hard_cap: number | null; stop_requested: boolean
+  completion_reason: string | null; error_summary: string | null
+}
+export type RecruitmentSignal = {
+  id: number; discovery_provider: string; source: string; source_url: string; domain: string | null
+  page_type: 'individual_job_offer' | 'search_or_listing' | 'career_board' | 'unknown'; page_type_label: string
+  title: string | null; snippet: string | null; company_name: string | null; job_title: string | null
+  location_label: string | null; commune: string | null; department_code: string | null
+  published_at: string | null; confidence: number | null; detection_reason: string | null
+  extraction: Record<string, unknown>; status: 'new' | 'review_needed' | 'promoted' | 'dismissed'
+  promoted_offer_id: number | null; first_seen_at: string; last_seen_at: string; observation_count: number
+  is_promotable: boolean; promotion_blockers: string[]
+}
+export type RecruitmentSignalPage = {
+  items: RecruitmentSignal[]; total: number; new_count: number; review_needed_count: number
+}
+
 export type CommercialExclusion = CommercialExclusionDetails & {
   active: boolean; status: 'active' | 'expired'; matching_basis: 'siren' | 'company_key'
 }
