@@ -12,6 +12,7 @@ from app import models  # noqa: F401 - registers metadata
 from app.api.commercial_leads import router as commercial_leads_router
 from app.api.commercial_exclusions import router as commercial_exclusions_router
 from app.api.commercial_relationships import router as commercial_relationships_router
+from app.api.commercial_configuration import router as commercial_configuration_router
 from app.api.brave_usage import router as brave_usage_router
 from app.api.search_runs import router as search_runs_router
 from app.api.job_offer_refresh_runs import router as job_offer_refresh_runs_router
@@ -55,6 +56,7 @@ app.add_middleware(
 app.include_router(commercial_leads_router)
 app.include_router(commercial_exclusions_router)
 app.include_router(commercial_relationships_router)
+app.include_router(commercial_configuration_router)
 app.include_router(brave_usage_router)
 app.include_router(search_runs_router)
 app.include_router(job_offer_refresh_runs_router)

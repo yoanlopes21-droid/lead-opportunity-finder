@@ -700,3 +700,27 @@ class WebsiteVerificationSignalRecord(Base):
     expected_value: Mapped[Optional[str]] = mapped_column(String(500))
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+
+
+class CommercialProfileRecord(Base):
+    """One private, locally configured consultant profile."""
+
+    __tablename__ = "commercial_profiles"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class CommercialCatalogOfferRecord(Base):
+    """A named local offer with validated, structured service terms."""
+
+    __tablename__ = "commercial_catalog_offers"
+    code: Mapped[str] = mapped_column(String(80), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class CommercialPolicyRecord(Base):
+    """Private rules; no client-facing price is inferred from these defaults."""
+
+    __tablename__ = "commercial_policies"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    payload: Mapped[dict] = mapped_column(JSON)
