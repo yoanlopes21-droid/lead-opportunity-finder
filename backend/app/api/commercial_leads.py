@@ -27,6 +27,7 @@ from app.services.commercial_leads.excel_export import (
 )
 from app.services.scoring.company import ScoreCategory
 from app.services.commercial_leads.approach import get_commercial_approach_context
+from app.services.commercial_leads.angle import CommercialAngle, get_commercial_angle
 
 
 router = APIRouter(prefix="/api/v1/commercial-leads", tags=["commercial leads"])
@@ -53,6 +54,19 @@ def get_approach_context(
     if context is None:
         raise HTTPException(status_code=404, detail="Commercial lead not found")
     return CommercialApproachContextResponse.model_validate(asdict(context))
+
+
+@router.get("/{company_key}/commercial-angle", response_model=CommercialAngle)
+def get_angle(
+    company_key: str,
+    department: Annotated[str, Query(min_length=1)] = "94",
+    session: Session = Depends(get_db),
+) -> CommercialAngle:
+    """Inspect a deterministic angle from local facts and private configuration."""
+    angle = get_commercial_angle(session, company_key, department)
+    if angle is None:
+        raise HTTPException(status_code=404, detail="Commercial lead not found")
+    return angle
 
 
 def _xlsx_response(content: bytes, filename: str) -> StreamingResponse:

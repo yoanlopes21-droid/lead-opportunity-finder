@@ -527,11 +527,13 @@ class CommercialApproachContextResponse(BaseModel):
     siret: Optional[str]
     identity_match_status: Optional[str]
     identity_source_url: Optional[str]
+    employee_range: Optional[str]
     employer_relationship_status: str
     employer_attribution: str
     employer_reasons: list[str]
     entry_offer: ApproachOfferResponse
     canonical_need_count: int
+    distinct_local_need_count: int
     source_listing_count: int
     contacts: list[ApproachContactResponse]
     recommended_contact_id: Optional[int]

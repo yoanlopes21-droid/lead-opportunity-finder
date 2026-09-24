@@ -93,6 +93,11 @@ class CommercialOffer(StrictModel):
     is_default: bool = False
     features: OfferFeatures
     guarantee_documentation: GuaranteeDocumentation
+    # Explicit per-field approval. Missing keys in older local catalogs remain
+    # internal; a client document must be reviewed before enabling a claim.
+    communication_scopes: dict[str, Literal[
+        "internal_only", "client_communicable", "manual_approval_required",
+    ]] = Field(default_factory=dict)
     claim_limitations: list[Literal[
         "hunt_target_not_response_or_presentation",
         "processing_deadline_not_hire_deadline",

@@ -1,0 +1,9 @@
+# Deterministic commercial angle
+
+`GET /api/v1/commercial-leads/{company_key}/commercial-angle?department=94` reads the existing commercial approach context and the local commercial profile, offer catalog, and policy. It performs no collection, network request, mutation, or runtime generation. A missing lead returns 404. An absent profile or catalog still permits a method-based preparation, without an unsupported specialty or commercial offer claim.
+
+The entry need remains a canonical need selected by the approach layer. Freshness, attribution, location, and source evidence precede any personal specialty preference. A documented personal occupation match can break a comparable-evidence tie. Sector alone cannot establish occupation expertise. The vocabulary in the service classifies occupations; only the private local profile authorizes a personal specialty claim.
+
+`readiness` mirrors block 1. `pack_status` can additionally require offer verification for a publication over 30 days old. `suspended` and confirmed intermediary states have no active prospecting angle. Employer and offer verification suppress all client-safe facts until cleared. Missing channels still allow preparation, with a generic function to request rather than an invented contact.
+
+The result keeps claims with type, source, confidence, communication flag, and limitations. Qualification questions contain uncertainties that must not become statements. `do_not_claim` carries both block 1 prohibitions and commercial-policy boundaries. Offer features enter `client_safe_facts` only when the field's local `communication_scopes` entry explicitly says `client_communicable`; omitted fields and internal documents remain internal. The service never selects a price, discount, guarantee, exclusivity, or premium offer. Starter is the current default when enabled. Enhanced is only an internal suggestion when multiple distinct local job locations are observed, and remains a manual choice.

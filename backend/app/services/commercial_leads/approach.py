@@ -10,7 +10,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlsplit
 
 from sqlalchemy import or_, select
@@ -100,11 +100,13 @@ class CommercialApproachContext:
     siret: Optional[str]
     identity_match_status: Optional[str]
     identity_source_url: Optional[str]
+    employee_range: Optional[str]
     employer_relationship_status: str
     employer_attribution: str
     employer_reasons: tuple[str, ...]
     entry_offer: ApproachOffer
     canonical_need_count: int
+    distinct_local_need_count: int
     source_listing_count: int
     contacts: tuple[ApproachContact, ...]
     recommended_contact_id: Optional[int]
@@ -129,6 +131,7 @@ class CommercialApproachContext:
 def get_commercial_approach_context(
     session: Session, company_key: str, department_code: str = "94",
     now: Optional[datetime] = None,
+    specialty_priority: Optional[Callable[[str], int]] = None,
 ) -> Optional[CommercialApproachContext]:
     """Read one existing lead and its minimal supporting records without I/O."""
     observed_at = now or datetime.now(timezone.utc)
@@ -139,6 +142,7 @@ def get_commercial_approach_context(
     history = _relationship_history(session, lead)
     return build_commercial_approach_context(
         lead, descriptions=descriptions, history=history, now=observed_at,
+        specialty_priority=specialty_priority,
     )
 
 
@@ -147,13 +151,16 @@ def build_commercial_approach_context(
     descriptions: Optional[dict[str, str]] = None,
     history: tuple[ApproachHistory, ...] = (),
     now: Optional[datetime] = None,
+    specialty_priority: Optional[Callable[[str], int]] = None,
 ) -> CommercialApproachContext:
     """Pure composition from an already assembled lead and optional read facts."""
     if not lead.active_job_offers:
         raise ValueError("an approach context requires an active canonical need")
     observed_at = _as_utc(now or datetime.now(timezone.utc))
     descriptions = descriptions or {}
-    entry, selection_reasons = _select_entry_offer(lead.active_job_offers, lead.company_name, descriptions)
+    entry, selection_reasons = _select_entry_offer(
+        lead.active_job_offers, lead.company_name, descriptions, specialty_priority,
+    )
     description = descriptions.get(_offer_key(entry))
     entry_warnings = _offer_warnings(entry, description, observed_at)
     attribution, employer_reasons = _employer_attribution(lead, descriptions)
@@ -245,6 +252,7 @@ def build_commercial_approach_context(
         official_name=lead.official_name, siren=lead.siren, siret=lead.siret,
         identity_match_status=lead.identity_match_status,
         identity_source_url=lead.identity_source_url,
+        employee_range=lead.employee_range,
         employer_relationship_status=lead.scoring.employer_relationship_status,
         employer_attribution=attribution, employer_reasons=employer_reasons,
         entry_offer=ApproachOffer(
@@ -259,6 +267,7 @@ def build_commercial_approach_context(
             selection_reasons=selection_reasons, warnings=entry_warnings,
         ),
         canonical_need_count=len(lead.active_job_offers),
+        distinct_local_need_count=len({item.local_key for item in lead.active_job_offers if item.display_location}),
         source_listing_count=sum(len(item.evidence) for item in lead.active_job_offers),
         contacts=contacts, recommended_contact_id=preferred_id,
         recommended_channel=preferred_channel, recommended_person_contact_id=preferred_person_id,
@@ -287,6 +296,7 @@ def _offer_key(offer: ActiveJobOffer) -> str:
 
 def _select_entry_offer(
     offers: tuple[ActiveJobOffer, ...], company_name: str, descriptions: dict[str, str],
+    specialty_priority: Optional[Callable[[str], int]] = None,
 ) -> tuple[ActiveJobOffer, tuple[str, ...]]:
     def quality(offer: ActiveJobOffer) -> tuple:
         description = descriptions.get(_offer_key(offer))
@@ -297,6 +307,7 @@ def _select_entry_offer(
             0 if ambiguous else 1,
             1 if offer.display_location else 0,
             1 if offer.source_urls else 0,
+            specialty_priority(offer.title) if specialty_priority else 0,
             -(age if age is not None else 100000),
             -offer.first_seen_at.timestamp(),
         )
@@ -310,6 +321,8 @@ def _select_entry_offer(
         reasons.append("published_within_30_days")
     if selected != offers[0]:
         reasons.append("quality_preferred_over_newest")
+    if specialty_priority and specialty_priority(selected.title) > 0:
+        reasons.append("personal_specialty_preferred_at_comparable_evidence_quality")
     return selected, tuple(reasons)
 
 
