@@ -195,7 +195,7 @@ def test_suspension_has_no_active_prospecting_angle(session):
     assert result.target_role is None and result.client_safe_facts == ()
 
 
-def test_enhanced_only_for_observed_multisite_and_premium_never_suggested(session):
+def test_multiple_locations_alone_never_suggest_enhanced(session):
     configured(session)
     save_offer(session, catalog("enhanced", default=False))
     save_offer(session, catalog("premium", default=False, enabled=False))
@@ -204,8 +204,7 @@ def test_enhanced_only_for_observed_multisite_and_premium_never_suggested(sessio
     offer(session, identifier="second", title="Technicien", location="94 - Vincennes", commune="94080")
     result = angle(session)
     assert result.selected_offer_code == "starter"
-    assert result.suggested_offer_code == "enhanced"
-    assert "enhanced_suggested_for_observed_multiple_locations_manual_choice" in result.reasons
+    assert result.suggested_offer_code is None
 
 
 def test_internal_and_client_document_scopes_and_manual_levers(session):

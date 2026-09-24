@@ -165,8 +165,9 @@ def _questions(context: CommercialApproachContext) -> tuple[QualificationQuestio
     elif any(term in role for term in ("technicien", "mecanicien", "data scientist", "developpeur")):
         extra = "Quelle compétence doit être maîtrisée dès l'arrivée ?"
     else:
-        extra = "Quel point du processus actuel souhaitez-vous compléter ?"
-    questions.append(QualificationQuestion(extra, "occupation_specific_clarification", True))
+        extra = None
+    if extra:
+        questions.append(QualificationQuestion(extra, "occupation_specific_clarification", True))
     return tuple(questions)
 
 
@@ -194,7 +195,7 @@ def _pack_status(context: CommercialApproachContext) -> str:
         ApproachReadiness.VERIFY_CONTACT: "verify_contact",
         ApproachReadiness.VERIFY_OFFER: "verify_offer",
         ApproachReadiness.VERIFY_EMPLOYER: "verify_employer",
-        ApproachReadiness.INTERMEDIARY_NOT_EMPLOYER: "suspended",
+        ApproachReadiness.INTERMEDIARY_NOT_EMPLOYER: "intermediary_not_employer",
         ApproachReadiness.SUSPENDED: "suspended",
     }[context.readiness]
 
@@ -216,15 +217,13 @@ def build_commercial_angle(
     primary, secondary, value_reason = _value(context, match)
     target_role, target_status, channel = _target(context)
     starter = next((item for item in catalog if item.code == "starter" and item.enabled_for_prospecting), None)
-    enhanced = next((item for item in catalog if item.code == "enhanced" and item.enabled_for_prospecting), None)
     selected_code = starter.code if starter else None
-    multisite = context.distinct_local_need_count >= 2 and context.employer_attribution == "direct_employer_plausible"
-    suggested_code = enhanced.code if enhanced and multisite and not suspended else None
+    # Separate adverts or communes do not establish a coordinated multisite
+    # assignment. No structured evidence of that complexity exists here yet.
+    suggested_code = None
     reasons = [*context.reasons, match_reason, territory_reason, value_reason]
     if selected_code is None:
         reasons.append("starter_unavailable_in_catalog")
-    if suggested_code:
-        reasons.append("enhanced_suggested_for_observed_multiple_locations_manual_choice")
     if communication_blocked:
         reasons.append("client_communication_blocked_by_readiness")
 
@@ -259,7 +258,7 @@ def build_commercial_angle(
     internal_advice = ["validate_price_discount_guarantee_and_exclusivity_manually"]
     if starter:
         for field, scope in sorted(starter.communication_scopes.items()):
-            if field not in {"display_name", "features.phone_screen", "features.interview_screen",
+            if field not in {"display_name", "features.hunt_campaign_count", "features.phone_screen", "features.interview_screen",
                              "features.consultant_analysis", "features.reference_checks"}:
                 continue
             value = starter.display_name if field == "display_name" else getattr(starter.features, field.partition(".")[2])

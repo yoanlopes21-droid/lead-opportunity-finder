@@ -28,6 +28,7 @@ from app.services.commercial_leads.excel_export import (
 from app.services.scoring.company import ScoreCategory
 from app.services.commercial_leads.approach import get_commercial_approach_context
 from app.services.commercial_leads.angle import CommercialAngle, get_commercial_angle
+from app.services.commercial_leads.approach_pack import CommercialApproachPack, get_commercial_approach_pack
 
 
 router = APIRouter(prefix="/api/v1/commercial-leads", tags=["commercial leads"])
@@ -41,6 +42,19 @@ CategoryQuery = Literal[
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
+
+
+@router.get("/{company_key}/approach-pack", response_model=CommercialApproachPack)
+def get_approach_pack(
+    company_key: str,
+    department: Annotated[str, Query(min_length=1)] = "94",
+    session: Session = Depends(get_db),
+) -> CommercialApproachPack:
+    """Compose local drafts and evidence; never contact a prospect or mutate data."""
+    pack = get_commercial_approach_pack(session, company_key, department)
+    if pack is None:
+        raise HTTPException(status_code=404, detail="Commercial lead not found")
+    return pack
 
 
 @router.get("/{company_key}/approach-context", response_model=CommercialApproachContextResponse)
