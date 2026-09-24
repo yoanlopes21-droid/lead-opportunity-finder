@@ -125,10 +125,15 @@ def evaluate_eligibility(
     """Apply exact SIREN-first matching without mutating the source data."""
     observed_at = _as_utc(now or datetime.now(timezone.utc))
     if target.siren:
-        matching = [item for item in exclusions if item.siren == target.siren]
+        # A confirmed SIREN wins over a same-name exclusion for another entity.
+        active = [item for item in exclusions if item.siren == target.siren and _is_active(item, observed_at)]
+        if not active:
+            # A name-only block remains valid when legal identity is enriched later.
+            active = [item for item in exclusions if item.siren is None
+                      and item.company_key == target.company_key and _is_active(item, observed_at)]
     else:
-        matching = [item for item in exclusions if item.company_key == target.company_key]
-    active = [item for item in matching if _is_active(item, observed_at)]
+        active = [item for item in exclusions if item.company_key == target.company_key
+                  and _is_active(item, observed_at)]
     if not active:
         return ExclusionDecision(is_eligible=True)
     return ExclusionDecision(is_eligible=False, exclusion=min(active, key=_priority_key))

@@ -13,9 +13,10 @@ SIREN optionnel, un instant de début et une expiration optionnelle.
 - `recent_prospect` est actif jusqu'à son expiration exclusive ;
 - `manual_exclusion` reste actif sans expiration.
 
-Le SIREN confirmé est la clé de rapprochement prioritaire. Sans SIREN confirmé,
-la comparaison utilise uniquement une `company_key` exacte : aucun rapprochement
-approximatif n'est appliqué.
+Le SIREN confirmé est la clé de rapprochement prioritaire. Une exclusion sans
+SIREN continue de s'appliquer à la `company_key` exacte après enrichissement
+juridique. Une exclusion rattachée à un autre SIREN confirmé ne s'applique pas
+sur le seul nom. Aucun rapprochement approximatif n'est appliqué.
 
 ## Contrat d'import futur
 
@@ -68,3 +69,41 @@ réponse mais ne sont pas promues en canal recommandé fiable.
 Les relations sont chargées par ensembles pour la page demandée (coordonnées,
 personnes, preuves et statuts web), puis la stratégie est calculée en mémoire;
 il n'y a pas de requête contacts/personnes/preuves par lead.
+
+## Entrée commerciale fiable
+
+`GET /api/v1/commercial-leads/{company_key}/approach-context?department=94`
+compose en lecture seule le contexte d'une entreprise possédant au moins une
+offre active dans le département. La clé est celle exposée par la liste des leads.
+Une clé absente renvoie 404. Aucun provider, enrichissement réseau ou envoi n'est
+déclenché. La route lit seulement les noms des offres actives du département,
+puis charge les enregistrements complets de l'entreprise sélectionnée.
+
+Le contexte réutilise la canonicalisation, le score, l'éligibilité et la stratégie
+de contact existants. Il distingue le nom observé de l'identité légale confirmée,
+et utilise exclusivement la localisation de l'offre d'entrée pour le besoin.
+`canonical_need_count` compte les besoins canoniques; `source_listing_count`
+compte leurs annonces sources. Aucun de ces compteurs ne prétend décrire le
+nombre de postes à pourvoir.
+
+`readiness` prend l'une des valeurs suivantes :
+
+- `ready_to_contact` : canal professionnel direct ou recrutement exploitable ;
+- `routing_required` : standard, email général ou page de contact à router ;
+- `channel_missing` : approche préparable, canal non trouvé ;
+- `verify_contact` : une coordonnée existe, mais sa portée ou sa fiabilité doit
+  être vérifiée ;
+- `verify_offer` : dernière observation du besoin vieille de plus de sept jours ;
+- `verify_employer` : l'attribution de l'annonce doit être vérifiée avant un
+  contenu client définitif ;
+- `intermediary_not_employer` : ne pas viser un employeur final supposé ;
+- `suspended` : exclusion active ou statut « ne plus contacter » / client.
+
+`approach_preparable` reste vrai sans SIREN, personne ou canal. Il reste aussi
+vrai pour `verify_employer`, ce qui autorise une préparation interne, mais
+`contact_now_possible` est alors faux. Les contacts candidats comprennent ceux
+qui sont écartés, avec `use`, `reason_codes`, portée et URLs de provenance.
+`usable_facts` et `prohibited_claims` serviront au futur compositeur; ce bloc ne
+produit ni texte commercial ni engagement contractuel. L'historique des lignes
+de suivi inactives demeure visible et bloque une affirmation automatique de
+« premier contact ».

@@ -186,6 +186,29 @@ def aggregate_active_company_opportunities(
     )
 
 
+def get_active_company_opportunity(
+    session: Session, company_key: str, department_code: str = "94",
+    now: Optional[datetime] = None,
+) -> Optional[CompanyOpportunity]:
+    """Build one opportunity with the same canonical rules as the lead listing.
+
+    Company keys are normalized in Python, so scan only offer names first and
+    load the full source rows for the matching company.
+    """
+    ids = tuple(row_id for row_id, name in session.execute(
+        select(ObservedJobOffer.id, ObservedJobOffer.company_name).where(
+            ObservedJobOffer.is_active.is_(True),
+            ObservedJobOffer.department_code == department_code,
+        )
+    ) if normalize_company_key(name) == company_key)
+    if not ids:
+        return None
+    offers = tuple(session.scalars(
+        select(ObservedJobOffer).where(ObservedJobOffer.id.in_(ids)).order_by(ObservedJobOffer.id)
+    ))
+    return _build_opportunity(company_key, offers, department_code, now or datetime.now(timezone.utc))
+
+
 def _build_opportunity(
     company_key: str,
     offers: Sequence[ObservedJobOffer],

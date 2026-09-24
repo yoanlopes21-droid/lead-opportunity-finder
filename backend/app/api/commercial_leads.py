@@ -1,6 +1,7 @@
 """Read-only HTTP representation and export of composed commercial leads."""
 
 from datetime import datetime, timezone
+from dataclasses import asdict
 from io import BytesIO
 from typing import Annotated, Literal, Optional
 
@@ -9,7 +10,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas import CommercialLeadListResponse, RecentCommercialLeadListResponse
+from app.schemas import (
+    CommercialApproachContextResponse, CommercialLeadListResponse, RecentCommercialLeadListResponse,
+)
 from app.services.commercial_leads.service import (
     CommercialLeadQuery,
     RecentCommercialLeadQuery,
@@ -23,6 +26,7 @@ from app.services.commercial_leads.excel_export import (
     export_filename,
 )
 from app.services.scoring.company import ScoreCategory
+from app.services.commercial_leads.approach import get_commercial_approach_context
 
 
 router = APIRouter(prefix="/api/v1/commercial-leads", tags=["commercial leads"])
@@ -36,6 +40,19 @@ CategoryQuery = Literal[
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
+
+
+@router.get("/{company_key}/approach-context", response_model=CommercialApproachContextResponse)
+def get_approach_context(
+    company_key: str,
+    department: Annotated[str, Query(min_length=1)] = "94",
+    session: Session = Depends(get_db),
+) -> CommercialApproachContextResponse:
+    """Inspect reliable commercial inputs for one existing lead; no discovery or writes."""
+    context = get_commercial_approach_context(session, company_key, department)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Commercial lead not found")
+    return CommercialApproachContextResponse.model_validate(asdict(context))
 
 
 def _xlsx_response(content: bytes, filename: str) -> StreamingResponse:

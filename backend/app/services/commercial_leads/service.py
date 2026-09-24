@@ -33,6 +33,7 @@ from app.services.opportunities.company import (
     LocalOpportunity,
     OpportunitySignal,
     aggregate_active_company_opportunities,
+    get_active_company_opportunity,
     normalize_company_key,
 )
 from app.services.scoring.company import (
@@ -96,6 +97,8 @@ class CommercialLead:
     recommended_channel: Optional[str] = None
     contactability: ContactabilityFacts = field(default_factory=ContactabilityFacts)
     contact_strategy: Optional[ContactStrategy] = None
+    identity_match_status: Optional[str] = None
+    identity_source_url: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +183,40 @@ def list_commercial_leads(
     return CommercialLeadPage(
         items=paged, total_count=total_count, offset=query.offset, limit=query.limit
     )
+
+
+def get_commercial_lead(
+    session: Session, company_key: str, department_code: str = "94",
+    now: Optional[datetime] = None, provider: str = "dinum",
+) -> Optional[CommercialLead]:
+    """Compose one lead with the same scoring, eligibility and contact rules."""
+    observed_at = now or datetime.now(timezone.utc)
+    opportunity = get_active_company_opportunity(session, company_key, department_code, observed_at)
+    if opportunity is None:
+        return None
+    enrichment = session.scalar(select(CompanyEnrichment).where(
+        CompanyEnrichment.company_key == company_key, CompanyEnrichment.provider == provider,
+    ))
+    exclusions = tuple(CommercialExclusionRecord.from_model(row) for row in session.scalars(
+        select(CommercialExclusion).where(or_(
+            CommercialExclusion.company_key == company_key,
+            CommercialExclusion.siren == enrichment.siren if enrichment and enrichment.siren else False,
+        ))
+    ))
+    relationships = tuple(CommercialRelationshipRecord.from_model(row) for row in session.scalars(
+        select(CommercialRelationship).where(
+            CommercialRelationship.is_active.is_(True),
+            or_(CommercialRelationship.company_key == company_key,
+                CommercialRelationship.siren == enrichment.siren if enrichment and enrichment.siren else False),
+        )
+    ))
+    evidence = tuple(LeadEvidence(
+        source_name=reference.source,
+        source_url=reference.source_url,
+        observed_at=offer.last_seen_at,
+    ) for offer in opportunity.active_job_offers for reference in offer.evidence)
+    lead = _build_lead(opportunity, enrichment, exclusions, relationships, evidence, observed_at)
+    return _attach_contactability(lead, _contactability_by_company_key(session, (company_key,))[company_key])
 
 
 def list_recent_commercial_leads(
@@ -329,6 +366,8 @@ def _build_lead(
         is_eligible=decision.is_eligible and commercial_relationship is None,
         exclusion=decision.exclusion,
         commercial_relationship=commercial_relationship,
+        identity_match_status=enrichment.match_status if enrichment else None,
+        identity_source_url=enrichment.provider_source if enrichment else None,
     )
 
 

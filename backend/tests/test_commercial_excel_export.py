@@ -292,7 +292,15 @@ def test_export_is_not_limited_to_frontend_page_size(client, session):
     assert workbook["Prospects"].max_row == 56
 
 
-def test_recent_export_respects_window_and_kind(client, session):
+def test_recent_export_respects_window_and_kind(client, session, monkeypatch):
+    import app.api.commercial_leads as commercial_leads_api
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW.astimezone(tz) if tz else NOW.replace(tzinfo=None)
+
+    monkeypatch.setattr(commercial_leads_api, "datetime", FixedDatetime)
     add_offer(session, "known-old", "ENTREPRISE CONNUE", first_seen_hours_ago=24 * 30, title="Comptable")
     add_offer(session, "known-new", "ENTREPRISE CONNUE", first_seen_hours_ago=30, title="Commercial")
     add_offer(session, "new-company", "NOUVELLE ENTREPRISE", first_seen_hours_ago=2)

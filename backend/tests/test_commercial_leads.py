@@ -102,6 +102,13 @@ def test_siren_match_is_prioritized_over_company_key(session):
     assert list_commercial_leads(session, now=NOW).items == ()
 
 
+def test_name_only_exclusion_still_applies_after_siren_is_confirmed(session):
+    add_offer(session, "1")
+    add_enrichment(session)
+    add_exclusion(session, company_key="acme sas", siren=None)
+    assert list_commercial_leads(session, now=NOW).items == ()
+
+
 def test_exact_company_key_fallback_never_fuzzy_matches(session):
     add_offer(session, "1")
     add_enrichment(session, status=MatchStatus.NOT_FOUND)

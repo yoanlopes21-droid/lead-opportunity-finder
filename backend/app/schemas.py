@@ -469,6 +469,90 @@ class CommercialRelationshipListResponse(BaseModel):
     total: int
 
 
+class ApproachFactResponse(BaseModel):
+    code: str
+    value: str
+    source_urls: list[str]
+
+
+class ApproachOfferResponse(BaseModel):
+    offer_id: str
+    source: str
+    title: str
+    location: Optional[str]
+    local_key: str
+    published_at: Optional[str]
+    first_seen_at: datetime
+    last_seen_at: datetime
+    age_days: Optional[int]
+    source_offer_ids: list[str]
+    source_urls: list[str]
+    source_observation_count: int
+    collection_observation_count: int
+    description_excerpt: Optional[str]
+    selection_reasons: list[str]
+    warnings: list[str]
+
+
+class ApproachContactResponse(BaseModel):
+    id: int
+    type: str
+    value: str
+    scope: str
+    local_key: Optional[str]
+    reach: str
+    person_contact_id: Optional[int]
+    role: str
+    use: str
+    confidence: str
+    verification_status: str
+    commercial_relevance: str
+    reason_codes: list[str]
+    source_urls: list[str]
+
+
+class ApproachHistoryResponse(BaseModel):
+    id: int
+    status: str
+    is_active: bool
+    last_contact_at: Optional[datetime]
+    next_action_at: Optional[datetime]
+
+
+class CommercialApproachContextResponse(BaseModel):
+    company_key: str
+    company_name: str
+    official_name: Optional[str]
+    siren: Optional[str]
+    siret: Optional[str]
+    identity_match_status: Optional[str]
+    identity_source_url: Optional[str]
+    employer_relationship_status: str
+    employer_attribution: str
+    employer_reasons: list[str]
+    entry_offer: ApproachOfferResponse
+    canonical_need_count: int
+    source_listing_count: int
+    contacts: list[ApproachContactResponse]
+    recommended_contact_id: Optional[int]
+    recommended_channel: str
+    recommended_person_contact_id: Optional[int]
+    contact_strategy_target: str
+    contact_strategy_reasons: list[str]
+    active_relationship_status: Optional[str]
+    relationship_history: list[ApproachHistoryResponse]
+    exclusion_type: Optional[str]
+    readiness: str
+    approach_preparable: bool
+    contact_now_possible: bool
+    verification_required: bool
+    reasons: list[str]
+    warnings: list[str]
+    missing_information: list[str]
+    usable_facts: list[ApproachFactResponse]
+    prohibited_claims: list[str]
+
+
 class CommercialLeadResponse(BaseModel):
     company_key: str
     company_name: str
