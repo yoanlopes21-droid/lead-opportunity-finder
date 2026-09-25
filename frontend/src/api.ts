@@ -1,4 +1,4 @@
-import type { BraveUsage, CommercialApproachPack, CommercialCatalogOfferSummary, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecentCommercialLeadPage, RecentLeadKind, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
+import type { BraveUsage, CommercialApproachPack, CommercialCatalogOfferSummary, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, InteractionCreate, InteractionHistory, InteractionSaved, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecentCommercialLeadPage, RecentLeadKind, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
 
 export const API_BASE_URL = 'http://127.0.0.1:8000'
 
@@ -103,6 +103,16 @@ export function fetchCommercialRelationships(view: string, search = ''): Promise
   const params = new URLSearchParams({ view })
   if (search.trim()) params.set('search', search.trim())
   return readJson<CommercialRelationshipPage>(`/api/v1/commercial-relationships?${params}`)
+}
+
+export function fetchInteractionHistory(companyKey: string): Promise<InteractionHistory> {
+  return readJson<InteractionHistory>(`/api/v1/commercial-interactions/${encodeURIComponent(companyKey)}`)
+}
+
+export function createCommercialInteraction(input: InteractionCreate): Promise<InteractionSaved> {
+  return readJson<InteractionSaved>('/api/v1/commercial-interactions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  })
 }
 
 export function createCommercialRelationshipFromLead(companyKey: string, input: CommercialRelationshipInput): Promise<CommercialRelationship> {

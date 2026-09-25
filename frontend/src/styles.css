@@ -169,6 +169,25 @@ h3 { font-size: 1.05rem; }
 .approach-toolbar label, .approach-card label { display: grid; gap: 7px; color: #2d4540; font-size: .85rem; font-weight: 800; }
 .approach-toolbar label { min-width: min(350px, 100%); }
 .approach-toolbar select, .approach-card input, .approach-card textarea { width: 100%; border: 1px solid #bdc9c1; border-radius: 9px; padding: 10px 12px; background: #fff; color: #183c35; font: inherit; }
+.interaction-panel { margin-bottom: 14px; }
+.interaction-panel .approach-toolbar { align-items: center; }
+.interaction-form { display: grid; gap: 13px; padding: 15px 0; border-top: 1px solid #e1e9e3; }
+.interaction-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.interaction-form select { width: 100%; border: 1px solid #bdc9c1; border-radius: 9px; padding: 10px 12px; background: #fff; color: #183c35; font: inherit; font-weight: 400; }
+.interaction-form label span { color: #657671; font-weight: 400; }
+.interaction-proposed { padding: 11px 13px; border-radius: 8px; background: #edf4ef; }
+.interaction-extra summary { color: #254f43; cursor: pointer; font-weight: 700; }
+.interaction-extra > div { display: grid; gap: 12px; padding-top: 12px; }
+.interaction-history { display: grid; gap: 10px; padding-left: 20px; }
+.interaction-history li { line-height: 1.45; }
+.interaction-history li span { display: block; color: #596b65; }
+.relationship-history { margin: 10px 0; padding: 12px 15px; border-radius: 9px; background: #f2f6f3; }
+.relationship-history ol { margin: 0; padding-left: 20px; }
+.relationship-history li + li { margin-top: 10px; }
+.relationship-history li p { margin: 4px 0; }
+.relationship-history li small { display: block; margin-top: 4px; }
+.relationship-card > .text-button + .text-button { margin-left: 12px; }
+@media (max-width: 720px) { .interaction-fields { grid-template-columns: 1fr; }.interaction-panel .approach-toolbar { align-items: stretch; } }
 .approach-card textarea { resize: vertical; line-height: 1.6; }
 .approach-script p:last-child { margin: 0; color: #172a28; font-size: 1.05rem; line-height: 1.7; }
 .approach-questions { display: grid; gap: 8px; }

@@ -442,6 +442,7 @@ class CommercialRelationship(Base):
     status: Mapped[str] = mapped_column(String(50), index=True)
     last_contact_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
     next_action_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), index=True)
+    next_action: Mapped[Optional[str]] = mapped_column(String(255))
     note: Mapped[Optional[str]] = mapped_column(Text)
     outcome: Mapped[Optional[str]] = mapped_column(String(500))
     contact_point_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contact_points.id"), index=True)
@@ -451,6 +452,28 @@ class CommercialRelationship(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CommercialInteraction(Base):
+    """User-confirmed, append-only commercial event."""
+
+    __tablename__ = "commercial_interactions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    siren: Mapped[Optional[str]] = mapped_column(String(9))
+    happened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    channel: Mapped[str] = mapped_column(String(30))
+    outcome: Mapped[str] = mapped_column(String(50))
+    resulting_status: Mapped[str] = mapped_column(String(50))
+    offer_code: Mapped[Optional[str]] = mapped_column(String(100))
+    job_title: Mapped[Optional[str]] = mapped_column(String(500))
+    contacted_person: Mapped[Optional[str]] = mapped_column(String(255))
+    note: Mapped[Optional[str]] = mapped_column(Text)
+    next_action: Mapped[Optional[str]] = mapped_column(String(255))
+    next_action_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    priority_expressed: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class PersonContact(Base):

@@ -69,6 +69,7 @@ class CommercialRelationshipInput:
     status: str
     last_contact_at: Optional[datetime] = None
     next_action_at: Optional[datetime] = None
+    next_action: Optional[str] = None
     note: Optional[str] = None
     outcome: Optional[str] = None
     contact_point_id: Optional[int] = None
@@ -85,6 +86,7 @@ class CommercialRelationshipRecord:
     status: str
     last_contact_at: Optional[datetime]
     next_action_at: Optional[datetime]
+    next_action: Optional[str]
     note: Optional[str]
     outcome: Optional[str]
     contact_point_id: Optional[int]
@@ -117,8 +119,6 @@ def find_relationship(
 def validate_relationship_input(item: CommercialRelationshipInput) -> None:
     if item.status not in VALID_RELATIONSHIP_STATUSES:
         raise ValueError("invalid relationship status")
-    if item.status == RelationshipStatus.FOLLOW_UP and item.next_action_at is None:
-        raise ValueError("follow_up requires next_action_at")
     if item.status == RelationshipStatus.MEETING_SCHEDULED and item.next_action_at is None:
         raise ValueError("meeting_scheduled requires next_action_at")
 
@@ -153,6 +153,7 @@ def upsert_relationship(
     row.status = item.status
     row.last_contact_at = _as_utc(item.last_contact_at) if item.last_contact_at else None
     row.next_action_at = _as_utc(item.next_action_at) if item.next_action_at else None
+    row.next_action = _clean(item.next_action)
     row.note = _clean(item.note)
     row.outcome = _clean(item.outcome)
     row.contact_point_id = item.contact_point_id

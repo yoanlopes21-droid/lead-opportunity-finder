@@ -433,6 +433,7 @@ class CommercialRelationshipUpdateRequest(BaseModel):
     status: str
     last_contact_at: Optional[datetime] = None
     next_action_at: Optional[datetime] = None
+    next_action: Optional[str] = Field(default=None, max_length=255)
     note: Optional[str] = Field(default=None, max_length=2000)
     outcome: Optional[str] = Field(default=None, max_length=500)
     contact_point_id: Optional[int] = None
@@ -452,6 +453,7 @@ class CommercialRelationshipResponse(BaseModel):
     status: str
     last_contact_at: Optional[datetime]
     next_action_at: Optional[datetime]
+    next_action: Optional[str]
     note: Optional[str]
     outcome: Optional[str]
     contact_point_id: Optional[int]

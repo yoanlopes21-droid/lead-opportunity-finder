@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Annotated, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -38,6 +39,7 @@ def _input(request: CommercialRelationshipUpdateRequest) -> CommercialRelationsh
         status=request.status,
         last_contact_at=request.last_contact_at,
         next_action_at=request.next_action_at,
+        next_action=request.next_action,
         note=request.note,
         outcome=request.outcome,
         contact_point_id=request.contact_point_id,
@@ -61,8 +63,8 @@ def _response(row: CommercialRelationship, now: Optional[datetime] = None) -> Co
     timing = None
     if record.next_action_at is not None:
         observed_at = now or datetime.now(timezone.utc)
-        next_date = record.next_action_at.date()
-        today = observed_at.date()
+        next_date = record.next_action_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Europe/Paris")).date() if record.next_action_at.tzinfo is None else record.next_action_at.astimezone(ZoneInfo("Europe/Paris")).date()
+        today = observed_at.astimezone(ZoneInfo("Europe/Paris")).date()
         timing = "overdue" if next_date < today else "today" if next_date == today else "upcoming"
     return CommercialRelationshipResponse(**record.__dict__, follow_up_timing=timing)
 
@@ -80,7 +82,7 @@ def list_relationships(
     if view == "ongoing":
         rows = [row for row in rows if row.status in ONGOING_STATUSES]
     elif view == "follow_up":
-        rows = [row for row in rows if row.next_action_at is not None and row.status not in {
+        rows = [row for row in rows if (row.next_action_at is not None or row.status == RelationshipStatus.FOLLOW_UP) and row.status not in {
             RelationshipStatus.CLIENT, RelationshipStatus.DO_NOT_CONTACT,
         }]
     elif view == "clients":

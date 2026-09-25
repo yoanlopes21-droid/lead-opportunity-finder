@@ -130,15 +130,34 @@ export type RelationshipStatus = 'contacted' | 'awaiting_reply' | 'follow_up' | 
 export type CommercialRelationship = {
   id: number; company_key: string; siren: string | null; company_name_snapshot: string
   status: RelationshipStatus; last_contact_at: string | null; next_action_at: string | null
+  next_action: string | null
   note: string | null; outcome: string | null; contact_point_id: number | null; person_contact_id: number | null
   used_channel: string | null; hard_exclusion_id: number | null; is_active: boolean
   created_at: string; updated_at: string; follow_up_timing: 'overdue' | 'today' | 'upcoming' | null
 }
 export type CommercialRelationshipInput = {
   status: RelationshipStatus; last_contact_at?: string; next_action_at?: string
+  next_action?: string
   note?: string; outcome?: string; contact_point_id?: number; person_contact_id?: number; used_channel?: string
 }
 export type CommercialRelationshipPage = { items: CommercialRelationship[]; total: number }
+
+export type InteractionChannel = 'phone' | 'email' | 'other' | 'professional_network'
+export type InteractionOutcome = 'no_answer' | 'switchboard' | 'wrong_contact' | 'conversation' | 'email_requested' | 'email_sent' | 'callback_requested' | 'interested' | 'meeting_scheduled' | 'no_current_need' | 'position_filled' | 'refused' | 'proposal_sent' | 'client' | 'do_not_contact'
+export type CommercialInteraction = {
+  id: number; company_key: string; siren: string | null; happened_at: string
+  channel: InteractionChannel; outcome: InteractionOutcome; resulting_status: RelationshipStatus
+  offer_code: string | null; job_title: string | null; contacted_person: string | null
+  note: string | null; next_action: string | null; next_action_at: string | null
+  priority_expressed: string | null; created_at: string
+}
+export type InteractionCreate = {
+  request_id: string; company_key: string; happened_at: string; channel: InteractionChannel
+  outcome: InteractionOutcome; offer_code?: string; contacted_person?: string
+  note?: string; next_action?: string; next_action_at?: string; priority_expressed?: string
+}
+export type InteractionHistory = { items: CommercialInteraction[] }
+export type InteractionSaved = { interaction: CommercialInteraction; relationship: CommercialRelationship }
 
 export type ApproachStatus = 'ready_for_call' | 'routing_required' | 'prepared_channel_missing' | 'verify_contact' | 'verify_offer' | 'verify_employer' | 'intermediary_not_employer' | 'suspended'
 export type CommunicationStatus = 'communicable' | 'prepared_no_channel' | 'verify_contact' | 'blocked'

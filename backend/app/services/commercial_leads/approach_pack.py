@@ -428,4 +428,13 @@ def get_commercial_approach_pack(
     if context is None:
         return None
     angle = build_commercial_angle(context, profile, catalog, policy, selected_offer_code)
-    return build_commercial_approach_pack(context, angle, profile)
+    from sqlalchemy import select
+    from app.models import CommercialInteraction
+    latest = session.scalar(select(CommercialInteraction).where(
+        CommercialInteraction.company_key == company_key,
+    ).order_by(CommercialInteraction.happened_at.desc(), CommercialInteraction.id.desc()).limit(1))
+    return build_commercial_approach_pack(
+        context, angle, profile,
+        call_request_kind="email" if latest and latest.outcome == "email_requested" else None,
+        confirmed_priority=latest.priority_expressed if latest else None,
+    )

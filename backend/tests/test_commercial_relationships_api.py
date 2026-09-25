@@ -69,11 +69,11 @@ def test_create_follow_up_from_real_lead_hides_it_from_new_opportunities(client,
     assert audited["commercial_relationship"]["id"] == response.json()["id"]
 
 
-def test_update_status_and_required_follow_up_date(client, session):
+def test_update_status_with_optional_follow_up_date(client, session):
     seed_lead(session)
     relationship_id = create_follow_up(client).json()["id"]
-    invalid = client.patch(f"/api/v1/commercial-relationships/{relationship_id}", json={"status": "follow_up"})
-    assert invalid.status_code == 422 and "date de relance" in invalid.json()["detail"]
+    undated = client.patch(f"/api/v1/commercial-relationships/{relationship_id}", json={"status": "follow_up"})
+    assert undated.status_code == 200 and undated.json()["next_action_at"] is None
     due = (NOW + timedelta(days=7)).isoformat()
     updated = client.patch(f"/api/v1/commercial-relationships/{relationship_id}", json={
         "status": "follow_up", "next_action_at": due, "note": "Rappeler mardi",

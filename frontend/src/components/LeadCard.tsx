@@ -130,7 +130,7 @@ export function LeadCard({ lead, recentContext, onRelationshipSaved }: LeadCardP
       {lead.people.length > 0 && <section className="people"><h3>Personnes identifiées</h3>{lead.people.map((item) => <Person key={item.id} person={item} contacts={lead.contacts} />)}</section>}
     </details>
     {(highlights.length > 0 || signals.length > 0 || lead.adjustments.length > 0 || lead.penalties.length > 0) && <details className="score-explanation"><summary>Pourquoi ce score ?</summary><div className="explanation-content"><ReasonList title="Points forts" reasons={highlights} />{signals.length > 0 && <div className="reason-list"><span>Signaux observés</span><ul>{signals.map((signal) => <li key={signal.name}>{signal.explanation}</li>)}</ul></div>}<ReasonList title="Ajustements" reasons={lead.adjustments} /><ReasonList title="Points de vigilance" reasons={lead.penalties} variant="penalty" /></div></details>}
-    {showApproach && <ApproachWorkspace lead={lead} onClose={() => setShowApproach(false)} />}
+    {showApproach && <ApproachWorkspace lead={lead} onClose={() => setShowApproach(false)} onRelationshipSaved={onRelationshipSaved} />}
     {showRelationshipModal && <RelationshipModal lead={lead} onClose={() => setShowRelationshipModal(false)} onSaved={() => { setShowRelationshipModal(false); onRelationshipSaved?.(`${lead.company_name} est maintenant dans le suivi commercial.`) }} />}
   </article>
 }

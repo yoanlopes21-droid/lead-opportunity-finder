@@ -1,14 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { createCommercialRelationshipFromLead, updateCommercialRelationship } from '../api'
 import type { CommercialLead, CommercialRelationship, CommercialRelationshipInput, RelationshipStatus } from '../types'
+import { relationshipLabels } from '../interactionRules'
 
 
-export const relationshipLabels: Record<RelationshipStatus, string> = {
-  contacted: 'Contacté', awaiting_reply: 'En attente de retour', follow_up: 'À relancer', interested: 'Intéressé',
-  meeting_scheduled: 'Rendez-vous pris', proposal_sent: 'Proposition envoyée', client: 'Client',
-  no_current_need: 'Pas de besoin actuellement', refused: 'Refus', wrong_contact: 'Mauvais interlocuteur',
-  do_not_contact: 'Ne plus contacter',
-}
+export { relationshipLabels } from '../interactionRules'
 
 const contactDateStatuses = new Set<RelationshipStatus>(['contacted', 'awaiting_reply', 'proposal_sent', 'refused', 'wrong_contact'])
 const nextActionStatuses = new Set<RelationshipStatus>(['contacted', 'awaiting_reply', 'follow_up', 'interested', 'meeting_scheduled', 'proposal_sent', 'no_current_need', 'refused'])
@@ -33,6 +29,7 @@ export function RelationshipModal({ lead, relationship, initialStatus = 'contact
   const [status, setStatus] = useState<RelationshipStatus>(relationship?.status ?? initialStatus)
   const [lastContactAt, setLastContactAt] = useState(localValue(relationship?.last_contact_at) || nowValue())
   const [nextActionAt, setNextActionAt] = useState(localValue(relationship?.next_action_at))
+  const [nextAction, setNextAction] = useState(relationship?.next_action ?? '')
   const [note, setNote] = useState(relationship?.note ?? '')
   const [outcome, setOutcome] = useState(relationship?.outcome ?? '')
   const [contactReference, setContactReference] = useState(
@@ -49,6 +46,7 @@ export function RelationshipModal({ lead, relationship, initialStatus = 'contact
       status,
       last_contact_at: contactDateStatuses.has(status) ? asIso(lastContactAt) : undefined,
       next_action_at: nextActionStatuses.has(status) ? asIso(nextActionAt) : undefined,
+      next_action: nextActionStatuses.has(status) ? nextAction || undefined : undefined,
       note: note || undefined,
       outcome: outcomeStatuses.has(status) ? outcome || undefined : undefined,
       contact_point_id: contactReference.startsWith('contact:') ? Number(contactReference.split(':')[1]) : undefined,
@@ -66,7 +64,7 @@ export function RelationshipModal({ lead, relationship, initialStatus = 'contact
   }
 
   const nextLabel = status === 'meeting_scheduled' ? 'Date du rendez-vous' : ['no_current_need', 'refused'].includes(status) ? 'Date de recontact' : status === 'follow_up' ? 'Prochaine relance' : 'Prochaine action / relance'
-  const nextRequired = status === 'follow_up' || status === 'meeting_scheduled'
+  const nextRequired = status === 'meeting_scheduled'
 
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section className="relationship-modal" role="dialog" aria-modal="true" aria-labelledby="relationship-modal-title">
@@ -74,7 +72,7 @@ export function RelationshipModal({ lead, relationship, initialStatus = 'contact
       <form onSubmit={(event) => void submit(event)}>
         <label>Statut<select value={status} onChange={(event) => setStatus(event.target.value as RelationshipStatus)}>{Object.entries(relationshipLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         {contactDateStatuses.has(status) && <label>Date du dernier contact<input type="datetime-local" value={lastContactAt} onChange={(event) => setLastContactAt(event.target.value)} required /></label>}
-        {nextActionStatuses.has(status) && <label>{nextLabel}<input type="datetime-local" value={nextActionAt} onChange={(event) => setNextActionAt(event.target.value)} required={nextRequired} /></label>}
+        {nextActionStatuses.has(status) && <><label>Action à effectuer <span>(facultatif)</span><input value={nextAction} onChange={(event) => setNextAction(event.target.value)} maxLength={255} /></label><label>{nextLabel}<input type="datetime-local" value={nextActionAt} onChange={(event) => setNextActionAt(event.target.value)} required={nextRequired} /></label></>}
         {outcomeStatuses.has(status) && <label>Motif / résultat <span>(facultatif)</span><input value={outcome} onChange={(event) => setOutcome(event.target.value)} maxLength={500} /></label>}
         {lead && (lead.contacts.length > 0 || lead.people.length > 0) && <label>Contact ou canal réellement utilisé <span>(facultatif)</span><select value={contactReference} onChange={(event) => setContactReference(event.target.value)}><option value="">Non renseigné</option>{lead.contacts.filter((item) => !item.stale && item.verification_status !== 'rejected').map((item) => <option key={`contact-${item.id}`} value={`contact:${item.id}`}>{item.type === 'email' ? 'Email' : item.type === 'phone' ? 'Téléphone' : item.type === 'website' ? 'Site web' : 'Canal'} — {item.value}</option>)}{lead.people.map((item) => <option key={`person-${item.id}`} value={`person:${item.id}`}>{item.display_name}{item.role_title ? ` — ${item.role_title}` : ''}</option>)}</select></label>}
         <label>Note courte <span>(facultatif)</span><textarea value={note} onChange={(event) => setNote(event.target.value)} rows={4} maxLength={2000} /></label>
