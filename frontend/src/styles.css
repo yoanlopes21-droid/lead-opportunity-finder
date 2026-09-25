@@ -133,3 +133,69 @@ h3 { font-size: 1.05rem; }
 .recent-filters button.active { background: #173d35; color: #fff; }
 
 @media (max-width: 720px) { .source-overview-grid, .source-layout { grid-template-columns: 1fr; }.board-card { grid-template-columns: 1fr; }.board-actions { grid-row: auto; }.signal-card header { flex-direction: column; }.signal-details { grid-template-columns: repeat(2, 1fr); }.source-fields { grid-template-columns: 1fr; } }
+
+/* Commercial approach workspace follows the existing Prospection surfaces. */
+.approach-card-trigger { align-self: center; border: 1px solid #9eb9aa; border-radius: 9px; padding: 9px 12px; background: #edf4ef; color: #205745; cursor: pointer; font-size: .81rem; font-weight: 800; white-space: nowrap; }
+.approach-card-trigger:hover { background: #dfece3; }
+.approach-backdrop { position: fixed; z-index: 60; inset: 0; display: flex; justify-content: end; background: #10292399; }
+.approach-drawer { display: flex; flex-direction: column; width: min(900px, 94vw); height: 100dvh; background: #f6f7f4; box-shadow: -18px 0 60px #081d1850; }
+.approach-drawer.wide { width: min(1280px, 100vw); }
+.approach-header { display: flex; justify-content: space-between; align-items: start; gap: 18px; padding: 23px 30px 14px; background: #fff; border-bottom: 1px solid #dce5df; }
+.approach-header h2 { margin: 0 0 5px; font-size: 1.75rem; }
+.approach-header p:last-child { margin: 0; color: #526963; line-height: 1.4; }
+.approach-header-actions { display: flex; align-items: center; gap: 12px; }
+.approach-header-actions .secondary-button { padding: 8px 11px; font-size: .8rem; }
+.approach-status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 14px 30px; background: #e8f3eb; border-bottom: 1px solid #dce5df; overflow-wrap: anywhere; }
+.approach-status.prepared_no_channel, .approach-status.verify_contact { background: #fff6e5; }
+.approach-status.blocked { background: #fff0eb; }
+.approach-status div { display: grid; align-content: start; gap: 3px; }
+.approach-status strong { color: #204c3e; font-size: .87rem; line-height: 1.3; }
+.approach-status.blocked strong { color: #853c2c; }
+.approach-status small, .approach-status span { color: #526963; font-size: .73rem; }
+.approach-status > p { grid-column: 1 / -1; margin: 0; color: #7b4e20; font-size: .75rem; line-height: 1.4; }
+.approach-status.blocked > p { color: #843f2c; }
+.approach-tabs { margin: 0; padding: 8px 30px; background: #fff; border-bottom: 1px solid #dce5df; }
+.approach-content { flex: 1; overflow-y: auto; padding: 22px 30px 44px; }
+.approach-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.approach-stack { display: grid; gap: 14px; max-width: 900px; }
+.approach-card { min-width: 0; padding: 19px 21px; border: 1px solid #dce5df; border-radius: 14px; background: #fff; box-shadow: 0 5px 15px #142d2a08; overflow-wrap: anywhere; }
+.approach-card h3 { margin: 2px 0 13px; color: #193d34; font-size: 1.08rem; }
+.approach-card p { margin-bottom: 10px; color: #304842; line-height: 1.6; }
+.approach-card p:last-child { margin-bottom: 0; }
+.approach-card ul { margin: 7px 0 0; padding-left: 20px; color: #304842; line-height: 1.55; }
+.approach-card li + li { margin-top: 8px; }
+.approach-card .contact-eyebrow { color: #667970; font-size: .68rem; }
+.approach-toolbar { display: flex; justify-content: space-between; align-items: end; gap: 13px; }
+.approach-toolbar label, .approach-card label { display: grid; gap: 7px; color: #2d4540; font-size: .85rem; font-weight: 800; }
+.approach-toolbar label { min-width: min(350px, 100%); }
+.approach-toolbar select, .approach-card input, .approach-card textarea { width: 100%; border: 1px solid #bdc9c1; border-radius: 9px; padding: 10px 12px; background: #fff; color: #183c35; font: inherit; }
+.approach-card textarea { resize: vertical; line-height: 1.6; }
+.approach-script p:last-child { margin: 0; color: #172a28; font-size: 1.05rem; line-height: 1.7; }
+.approach-questions { display: grid; gap: 8px; }
+.approach-questions p { margin: 0; padding: 10px 12px; border-radius: 8px; background: #f1f5f2; }
+.approach-objection { border-top: 1px solid #e1e9e3; padding: 11px 0; }
+.approach-objection summary { color: #254f43; cursor: pointer; font-weight: 800; line-height: 1.45; }
+.approach-objection > div { padding-top: 13px; }
+.approach-objection .approach-client-text { padding: 11px 13px; border-left: 3px solid #76a889; background: #f2f7f3; color: #193e33; }
+.approach-internal { margin: 12px 0; padding: 11px 13px; border-radius: 8px; background: #f2f4f2; }
+.approach-internal p { margin: 0 0 6px; color: #596b65; font-size: .79rem; }
+.approach-objection .secondary-button { padding: 8px 10px; font-size: .77rem; }
+.approach-readiness-note { margin: 0; padding: 12px 14px; border-radius: 9px; background: #fff5e4; color: #77551b; font-size: .86rem; line-height: 1.5; }
+.approach-email { display: grid; gap: 14px; }
+.approach-email .contact-eyebrow { margin: 0; }
+.approach-copy-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.approach-edit-note, .approach-attachment { margin: 0; color: #63726e; font-size: .8rem; line-height: 1.5; }
+.approach-evidence { list-style: none; padding-left: 0 !important; }
+.approach-evidence li { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid #e1e9e3; }
+.approach-evidence small { color: #657671; }
+.approach-evidence a, .approach-card a { color: #246650; }
+.approach-manual-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 16px 0; }
+.approach-manual-grid span { padding: 10px 12px; border-radius: 8px; background: #f1f5f2; color: #304842; font-size: .83rem; }
+.approach-copy-notice { padding: 10px 30px; border-top: 1px solid #dce5df; background: #e8f3eb; color: #205745; font-size: .83rem; }
+@media (max-width: 800px) { .approach-drawer { width: 100vw; }.approach-header, .approach-content { padding-left: 18px; padding-right: 18px; }.approach-tabs { padding-left: 18px; padding-right: 18px; }.approach-status { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 18px; }.approach-grid { grid-template-columns: 1fr; }.approach-card-trigger { white-space: normal; }.approach-toolbar { align-items: stretch; flex-direction: column; }.approach-toolbar label { width: 100%; }.approach-header h2 { font-size: 1.45rem; } }
+.approach-email input, .approach-email textarea, .approach-card input { font-weight: 400; }
+.approach-confirm { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 12px; border-radius: 9px; background: #fff5e4; color: #77551b; }
+.approach-confirm p { width: 100%; margin: 0; color: inherit; font-size: .84rem; }
+.approach-confirm button { padding: 8px 11px; font-size: .78rem; }
+.approach-source-details { margin: 15px 0; }
+.approach-source-details summary { cursor: pointer; color: #28594f; font-size: .86rem; font-weight: 800; }

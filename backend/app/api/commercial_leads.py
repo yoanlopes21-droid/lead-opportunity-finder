@@ -29,6 +29,7 @@ from app.services.scoring.company import ScoreCategory
 from app.services.commercial_leads.approach import get_commercial_approach_context
 from app.services.commercial_leads.angle import CommercialAngle, get_commercial_angle
 from app.services.commercial_leads.approach_pack import CommercialApproachPack, get_commercial_approach_pack
+from app.services.commercial_configuration import list_offers
 
 
 router = APIRouter(prefix="/api/v1/commercial-leads", tags=["commercial leads"])
@@ -48,10 +49,13 @@ MAX_LIMIT = 200
 def get_approach_pack(
     company_key: str,
     department: Annotated[str, Query(min_length=1)] = "94",
+    offer_code: Optional[str] = None,
     session: Session = Depends(get_db),
 ) -> CommercialApproachPack:
     """Compose local drafts and evidence; never contact a prospect or mutate data."""
-    pack = get_commercial_approach_pack(session, company_key, department)
+    if offer_code and not any(offer.code == offer_code and offer.enabled_for_prospecting for offer in list_offers(session)):
+        raise HTTPException(status_code=422, detail="Offer is not enabled for prospecting")
+    pack = get_commercial_approach_pack(session, company_key, department, selected_offer_code=offer_code)
     if pack is None:
         raise HTTPException(status_code=404, detail="Commercial lead not found")
     return pack

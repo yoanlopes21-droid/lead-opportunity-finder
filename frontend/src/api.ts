@@ -1,6 +1,16 @@
-import type { BraveUsage, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecentCommercialLeadPage, RecentLeadKind, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
+import type { BraveUsage, CommercialApproachPack, CommercialCatalogOfferSummary, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecentCommercialLeadPage, RecentLeadKind, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
 
 export const API_BASE_URL = 'http://127.0.0.1:8000'
+
+export function fetchApproachPack(companyKey: string, department: string, offerCode?: string): Promise<CommercialApproachPack> {
+  const params = new URLSearchParams({ department })
+  if (offerCode) params.set('offer_code', offerCode)
+  return readJson<CommercialApproachPack>(`/api/v1/commercial-leads/${encodeURIComponent(companyKey)}/approach-pack?${params}`)
+}
+
+export function fetchCommercialCatalogOffers(): Promise<CommercialCatalogOfferSummary[]> {
+  return readJson<CommercialCatalogOfferSummary[]>('/api/v1/commercial-configuration/offers')
+}
 
 async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, init)

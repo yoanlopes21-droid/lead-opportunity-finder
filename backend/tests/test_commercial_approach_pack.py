@@ -15,7 +15,7 @@ from app.services.commercial_leads.approach_pack import (
 )
 from app.services.commercial_leads.angle import build_commercial_angle
 from app.services.commercial_leads.approach import get_commercial_approach_context
-from app.services.commercial_configuration import CommercialPolicy, save_profile
+from app.services.commercial_configuration import CommercialPolicy, save_offer, save_profile
 from app.services.contactability.contracts import (
     ContactConfidence, ContactScope, ContactType, PersonContactInput, PersonRelevanceRole,
     VerificationStatus,
@@ -357,5 +357,44 @@ def test_read_only_api_exposes_separate_drafts(session):
         assert result["email"][0]["type"] == "cold_email"
         assert any(item["type"] == "phone_gatekeeper" for item in result["phone"])
         assert result["evidence"]["sources"]
+        assert result["communication_title"] == "Technicien"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_manual_offer_override_recomposes_from_selected_catalog(session):
+    configured(session)
+    offer(session, title="Technicien")
+    enhanced = catalog("enhanced", default=False, scopes={
+        "features.hunt_campaign_count": "client_communicable",
+        "features.phone_screen": "client_communicable",
+    })
+    enhanced = enhanced.model_copy(update={
+        "features": enhanced.features.model_copy(update={"hunt_campaign_count": 1}),
+    })
+    save_offer(session, enhanced)
+    starter = pack(session)
+    result = get_commercial_approach_pack(session, "nova", now=NOW, selected_offer_code="enhanced")
+    assert starter.internal.selected_offer == "starter"
+    assert result.internal.selected_offer == "enhanced"
+    assert any(claim.source_reference == "enhanced.features.hunt_campaign_count"
+               for claim in result.evidence.claims_used)
+    assert "cibler et préqualifier" in draft(result, "cold_email").body
+    assert "cibler et préqualifier" not in draft(starter, "cold_email").body
+
+
+def test_offer_override_api_rejects_disabled_and_unknown_catalog_offers(session):
+    configured(session)
+    offer(session)
+    save_offer(session, catalog("premium", default=False, enabled=False))
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        with TestClient(app) as client:
+            for code in ("premium", "missing"):
+                response = client.get(f"/api/v1/commercial-leads/nova/approach-pack?offer_code={code}")
+                assert response.status_code == 422
+            response = client.get("/api/v1/commercial-leads/nova/approach-pack?offer_code=starter")
+            assert response.status_code == 200
+            assert response.json()["internal"]["selected_offer"] == "starter"
     finally:
         app.dependency_overrides.clear()

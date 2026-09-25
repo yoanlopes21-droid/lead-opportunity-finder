@@ -205,6 +205,7 @@ def build_commercial_angle(
     profile: Optional[CommercialProfile],
     catalog: tuple[CommercialOffer, ...],
     policy: Optional[CommercialPolicy],
+    selected_offer_code: Optional[str] = None,
 ) -> CommercialAngle:
     """Pure decision function. Unknown and unapproved values remain internal."""
     suspended = context.readiness in {ApproachReadiness.SUSPENDED, ApproachReadiness.INTERMEDIARY_NOT_EMPLOYER}
@@ -216,8 +217,9 @@ def build_commercial_angle(
     territory, territory_reason = _territory(context, profile)
     primary, secondary, value_reason = _value(context, match)
     target_role, target_status, channel = _target(context)
-    starter = next((item for item in catalog if item.code == "starter" and item.enabled_for_prospecting), None)
-    selected_code = starter.code if starter else None
+    selected_offer = next((item for item in catalog if item.code == (selected_offer_code or "starter")
+                           and item.enabled_for_prospecting), None)
+    selected_code = selected_offer.code if selected_offer else None
     # Separate adverts or communes do not establish a coordinated multisite
     # assignment. No structured evidence of that complexity exists here yet.
     suggested_code = None
@@ -256,17 +258,17 @@ def build_commercial_angle(
             ("no_travel_time_or_local_difficulty_inferred",),
         ))
     internal_advice = ["validate_price_discount_guarantee_and_exclusivity_manually"]
-    if starter:
-        for field, scope in sorted(starter.communication_scopes.items()):
+    if selected_offer:
+        for field, scope in sorted(selected_offer.communication_scopes.items()):
             if field not in {"display_name", "features.hunt_campaign_count", "features.phone_screen", "features.interview_screen",
                              "features.consultant_analysis", "features.reference_checks"}:
                 continue
-            value = starter.display_name if field == "display_name" else getattr(starter.features, field.partition(".")[2])
+            value = selected_offer.display_name if field == "display_name" else getattr(selected_offer.features, field.partition(".")[2])
             if not value:
                 continue
             if scope == "client_communicable":
                 claims.append(AngleClaim(f"{field}={value}", "catalog_fact", "local_commercial_catalog",
-                                         f"starter.{field}", "configured", not communication_blocked))
+                                         f"{selected_offer.code}.{field}", "configured", not communication_blocked))
             else:
                 internal_advice.append(f"catalog_field_{field}_{scope}")
     if profile is None:

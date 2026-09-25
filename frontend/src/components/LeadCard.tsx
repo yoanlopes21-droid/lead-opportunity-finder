@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createCommercialRelationshipFromLead } from '../api'
 import type { ActiveJobOffer, CommercialLead, ContactPoint, PersonContact, Provenance, ScoreReason } from '../types'
 import { RelationshipModal } from './RelationshipModal'
+import { ApproachWorkspace } from './ApproachWorkspace'
 
 type RecentContext = {
   latestNewOpportunityAt: string
@@ -86,6 +87,7 @@ function recencyLabel(value: string) {
 
 export function LeadCard({ lead, recentContext, onRelationshipSaved }: LeadCardProps) {
   const [showRelationshipModal, setShowRelationshipModal] = useState(false)
+  const [showApproach, setShowApproach] = useState(false)
   const [quickSaving, setQuickSaving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const category = categoryMeta[lead.category] ?? { label: lead.category, tone: 'low' }
@@ -112,7 +114,7 @@ export function LeadCard({ lead, recentContext, onRelationshipSaved }: LeadCardP
   }
 
   return <article className="lead-card">
-    <header className="lead-card-header"><div><p className={`category-badge ${category.tone}`}><span aria-hidden="true">{lead.category.slice(0, 2)}</span> {category.label}</p><h2>{lead.company_name}</h2>{lead.official_name && lead.official_name !== lead.company_name && <p className="official-name">{lead.official_name}</p>}</div><div className="lead-card-tools"><div className="score" aria-label={`Score commercial ${lead.total_score} sur 100`}><small>Score commercial</small><strong>{lead.total_score}</strong><span>/100</span></div><details className="lead-actions"><summary aria-label={`Actions pour ${lead.company_name}`}>•••</summary><div><button type="button" onClick={() => setShowRelationshipModal(true)}>Mettre à jour le suivi commercial</button><button type="button" onClick={() => void markContacted()} disabled={quickSaving}>{quickSaving ? 'Enregistrement…' : 'Marquer comme contacté'}</button></div></details></div></header>
+    <header className="lead-card-header"><div><p className={`category-badge ${category.tone}`}><span aria-hidden="true">{lead.category.slice(0, 2)}</span> {category.label}</p><h2>{lead.company_name}</h2>{lead.official_name && lead.official_name !== lead.company_name && <p className="official-name">{lead.official_name}</p>}</div><div className="lead-card-tools"><button type="button" className="approach-card-trigger" onClick={() => setShowApproach(true)}>Préparer l’approche</button><div className="score" aria-label={`Score commercial ${lead.total_score} sur 100`}><small>Score commercial</small><strong>{lead.total_score}</strong><span>/100</span></div><details className="lead-actions"><summary aria-label={`Actions pour ${lead.company_name}`}>•••</summary><div><button type="button" onClick={() => setShowRelationshipModal(true)}>Mettre à jour le suivi commercial</button><button type="button" onClick={() => void markContacted()} disabled={quickSaving}>{quickSaving ? 'Enregistrement…' : 'Marquer comme contacté'}</button></div></details></div></header>
     {actionError && <p className="inline-error" role="alert">{actionError}</p>}
     {recentContext && <div className="recent-context" aria-label="Contexte de nouveauté"><span>{recentContext.isNewCompany ? `Nouvelle entreprise · ${recentContext.newOfferCount} offre${recentContext.newOfferCount > 1 ? 's' : ''} détectée${recentContext.newOfferCount > 1 ? 's' : ''}` : `${recentContext.newOfferCount} nouvelle${recentContext.newOfferCount > 1 ? 's' : ''} offre${recentContext.newOfferCount > 1 ? 's' : ''} en ${recentContext.windowLabel}`}</span><small>Dernière nouveauté {recencyLabel(recentContext.latestNewOpportunityAt)}</small></div>}
     {!lead.is_eligible && lead.exclusion && <p className="exclusion-note"><strong>Entreprise exclue — {exclusionLabels[lead.exclusion.exclusion_type] ?? 'Exclusion'}.</strong>{lead.exclusion.reason && <> {lead.exclusion.reason}</>}</p>}
@@ -128,6 +130,7 @@ export function LeadCard({ lead, recentContext, onRelationshipSaved }: LeadCardP
       {lead.people.length > 0 && <section className="people"><h3>Personnes identifiées</h3>{lead.people.map((item) => <Person key={item.id} person={item} contacts={lead.contacts} />)}</section>}
     </details>
     {(highlights.length > 0 || signals.length > 0 || lead.adjustments.length > 0 || lead.penalties.length > 0) && <details className="score-explanation"><summary>Pourquoi ce score ?</summary><div className="explanation-content"><ReasonList title="Points forts" reasons={highlights} />{signals.length > 0 && <div className="reason-list"><span>Signaux observés</span><ul>{signals.map((signal) => <li key={signal.name}>{signal.explanation}</li>)}</ul></div>}<ReasonList title="Ajustements" reasons={lead.adjustments} /><ReasonList title="Points de vigilance" reasons={lead.penalties} variant="penalty" /></div></details>}
+    {showApproach && <ApproachWorkspace lead={lead} onClose={() => setShowApproach(false)} />}
     {showRelationshipModal && <RelationshipModal lead={lead} onClose={() => setShowRelationshipModal(false)} onSaved={() => { setShowRelationshipModal(false); onRelationshipSaved?.(`${lead.company_name} est maintenant dans le suivi commercial.`) }} />}
   </article>
 }

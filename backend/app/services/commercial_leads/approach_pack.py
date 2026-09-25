@@ -78,6 +78,7 @@ class CommercialApproachPack:
     status: str
     communication_status: str
     company: str
+    communication_title: str
     entry_offer: ApproachOffer
     commercial_angle: CommercialAngle
     phone: tuple[PhoneDraft, ...]
@@ -183,7 +184,7 @@ def _location_phrase(value: Optional[str]) -> str:
 
 
 def _catalog_claim(angle: CommercialAngle, field: str) -> bool:
-    return any(c.source_reference == f"starter.{field}" for c in angle.client_safe_facts)
+    return any(c.source_reference == f"{angle.selected_offer_code}.{field}" for c in angle.client_safe_facts)
 
 
 def _priority_codes(angle: CommercialAngle) -> tuple[str, ...]:
@@ -372,9 +373,9 @@ def build_commercial_approach_pack(
     def was_used(claim: AngleClaim) -> bool:
         if claim.claim_type == "observed_job_fact":
             return claim.claim == angle.entry_offer.title or bool(place and claim.claim == angle.entry_offer.location)
-        if claim.source_reference == "starter.features.phone_screen":
+        if claim.source_reference == f"{angle.selected_offer_code}.features.phone_screen":
             return has_screen
-        if claim.source_reference == "starter.features.hunt_campaign_count":
+        if claim.source_reference == f"{angle.selected_offer_code}.features.hunt_campaign_count":
             return has_hunt
         if claim.source_reference.startswith("territories:"):
             return territory_safe
@@ -407,6 +408,7 @@ def build_commercial_approach_pack(
                             else "verify_contact" if status == "verify_contact" else "communicable")
     return CommercialApproachPack(
         status=status, communication_status=communication_status, company=angle.company_name,
+        communication_title=label,
         entry_offer=angle.entry_offer, commercial_angle=angle, phone=phone, email=email,
         priority_objections=_priority_codes(angle) if objections else (), objections=objections,
         evidence=PackEvidence(claims, tuple(dict.fromkeys(c.source_reference for c in claims)),
@@ -416,6 +418,7 @@ def build_commercial_approach_pack(
 
 def get_commercial_approach_pack(
     session: Session, company_key: str, department_code: str = "94", now: Optional[datetime] = None,
+    selected_offer_code: Optional[str] = None,
 ) -> Optional[CommercialApproachPack]:
     profile = read_profile(session)
     catalog: tuple[CommercialOffer, ...] = tuple(list_offers(session))
@@ -424,5 +427,5 @@ def get_commercial_approach_pack(
     context = get_commercial_approach_context(session, company_key, department_code, now, specialty_priority=priority)
     if context is None:
         return None
-    angle = build_commercial_angle(context, profile, catalog, policy)
+    angle = build_commercial_angle(context, profile, catalog, policy, selected_offer_code)
     return build_commercial_approach_pack(context, angle, profile)
