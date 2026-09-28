@@ -45,12 +45,16 @@ def _validation_message(message: str) -> str:
     }.get(message, message)
 
 
-def _response(row: CommercialExclusion, now: Optional[datetime] = None) -> CommercialExclusionManagementResponse:
+def _response(
+    row: CommercialExclusion, now: Optional[datetime] = None,
+    linked_relationship_id: Optional[int] = None,
+) -> CommercialExclusionManagementResponse:
     record = CommercialExclusionRecord.from_model(row)
     active = is_exclusion_active(record, now)
     return CommercialExclusionManagementResponse(
         **record.__dict__, active=active, status=("active" if active else "expired"),
         matching_basis=("siren" if row.siren else "company_key"),
+        linked_relationship_id=linked_relationship_id,
     )
 
 
@@ -95,7 +99,11 @@ def list_exclusions(
         CommercialExclusion.created_at.desc(), CommercialExclusion.id.desc(),
     )).all()
     now = datetime.now(timezone.utc)
-    items = [_response(row, now) for row in rows]
+    linked = {item.hard_exclusion_id: item.id for item in session.scalars(select(CommercialRelationship).where(
+        CommercialRelationship.hard_exclusion_id.is_not(None),
+        CommercialRelationship.is_active.is_(True),
+    ))}
+    items = [_response(row, now, linked.get(row.id)) for row in rows]
     if status != "all":
         active = status == "active"
         items = [item for item in items if item.active is active]

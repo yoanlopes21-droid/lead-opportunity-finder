@@ -214,7 +214,11 @@ def test_recent_read_does_not_change_historical_dashboard_result(session):
 
 
 def test_recent_api_contract_and_dashboard_contract_remain_separate(session):
-    add_offer(session, "api", "API RECENTE", first_seen_hours_ago=1)
+    offer = add_offer(session, "api", "API RECENTE", first_seen_hours_ago=1)
+    api_now = datetime.now(timezone.utc)
+    offer.first_seen_at = api_now - timedelta(hours=1)
+    offer.last_seen_at = api_now
+    offer.last_changed_at = offer.first_seen_at
     session.commit()
 
     def override_get_db():

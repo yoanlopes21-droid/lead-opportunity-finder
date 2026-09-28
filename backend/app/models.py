@@ -466,6 +466,11 @@ class CommercialInteraction(Base):
     channel: Mapped[str] = mapped_column(String(30))
     outcome: Mapped[str] = mapped_column(String(50))
     resulting_status: Mapped[str] = mapped_column(String(50))
+    need_id: Mapped[Optional[str]] = mapped_column(String(600), index=True)
+    need_source: Mapped[Optional[str]] = mapped_column(String(120))
+    need_location: Mapped[Optional[str]] = mapped_column(String(500))
+    need_source_url: Mapped[Optional[str]] = mapped_column(String(2048))
+    need_status: Mapped[Optional[str]] = mapped_column(String(30))
     offer_code: Mapped[Optional[str]] = mapped_column(String(100))
     job_title: Mapped[Optional[str]] = mapped_column(String(500))
     contacted_person: Mapped[Optional[str]] = mapped_column(String(255))
@@ -473,6 +478,23 @@ class CommercialInteraction(Base):
     next_action: Mapped[Optional[str]] = mapped_column(String(255))
     next_action_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     priority_expressed: Mapped[Optional[str]] = mapped_column(Text)
+    next_action_mode: Mapped[str] = mapped_column(String(20), default="preserve")
+    applied_to_current_state: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CommercialNeedVerification(Base):
+    """Human confirmation that one precise recruitment need still exists."""
+
+    __tablename__ = "commercial_need_verifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_key: Mapped[str] = mapped_column(String(500), index=True)
+    siren: Mapped[Optional[str]] = mapped_column(String(9), index=True)
+    need_id: Mapped[str] = mapped_column(String(600), index=True)
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    channel: Mapped[str] = mapped_column(String(30))
+    note: Mapped[Optional[str]] = mapped_column(Text)
+    scope: Mapped[str] = mapped_column(String(50), default="need_exists")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

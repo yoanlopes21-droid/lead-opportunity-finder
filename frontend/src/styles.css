@@ -218,3 +218,16 @@ h3 { font-size: 1.05rem; }
 .approach-confirm button { padding: 8px 11px; font-size: .78rem; }
 .approach-source-details { margin: 15px 0; }
 .approach-source-details summary { cursor: pointer; color: #28594f; font-size: .86rem; font-weight: 800; }
+.relationship-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
+.follow-up-badge.planning { background: #eeeaf8; color: #5f4b8a; }
+.administrative-action { color: #687873; }
+.dossier-need-picker { display: flex; align-items: end; justify-content: space-between; gap: 14px; padding: 12px 30px; border-bottom: 1px solid #dce5df; background: #f7faf7; }
+.dossier-need-picker label { display: grid; min-width: min(520px, 100%); gap: 5px; color: #405b53; font-size: .78rem; font-weight: 800; }
+.dossier-need-picker select { border: 1px solid #bdc9c1; border-radius: 8px; padding: 9px 10px; background: #fff; color: #173d35; font: inherit; }
+.new-need-badge, .historical-need-badge { display: inline-flex; width: fit-content; padding: 5px 8px; border-radius: 999px; background: #e5f3e9; color: #1e664b; font-size: .72rem; font-weight: 850; }
+.historical-need-badge { margin-top: 7px !important; background: #f1eee7; color: #685d48 !important; }
+.historical-need { border-left: 4px solid #9b917d; }
+.dossier-evidence-actions { margin-top: 14px; }
+.dossier-evidence-actions > details { padding: 12px 0; border-top: 1px solid #e1e9e3; }
+.dossier-evidence-actions summary { color: #254f43; cursor: pointer; font-weight: 800; }
+@media (max-width: 720px) { .relationship-card-heading { flex-direction: column; }.relationship-actions { justify-content: start; }.dossier-need-picker { align-items: stretch; flex-direction: column; padding: 12px 18px; } }

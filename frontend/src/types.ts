@@ -110,6 +110,7 @@ export type RecruitmentSignalPage = {
 
 export type CommercialExclusion = CommercialExclusionDetails & {
   active: boolean; status: 'active' | 'expired'; matching_basis: 'siren' | 'company_key'
+  linked_relationship_id: number | null
 }
 export type CommercialExclusionPage = { items: CommercialExclusion[]; total: number }
 export type CommercialExclusionCreate = {
@@ -142,19 +143,35 @@ export type CommercialRelationshipInput = {
 }
 export type CommercialRelationshipPage = { items: CommercialRelationship[]; total: number }
 
+export type CommercialNeed = {
+  need_id: string; title: string; location: string | null; source: string | null
+  source_url: string | null; active: boolean; first_seen_at: string | null
+  last_seen_at: string | null; newly_observed: boolean
+}
+export type CommercialDossier = {
+  relationship: CommercialRelationship; active_lead: CommercialLead | null
+  needs: CommercialNeed[]; selected_need_id: string | null
+  can_prepare_new_outreach: boolean; can_record_interaction: boolean
+  communication_status: CommunicationStatus | 'historical_only'
+}
+
 export type InteractionChannel = 'phone' | 'email' | 'other' | 'professional_network'
 export type InteractionOutcome = 'no_answer' | 'switchboard' | 'wrong_contact' | 'conversation' | 'email_requested' | 'email_sent' | 'callback_requested' | 'interested' | 'meeting_scheduled' | 'no_current_need' | 'position_filled' | 'refused' | 'proposal_sent' | 'client' | 'do_not_contact'
 export type CommercialInteraction = {
   id: number; company_key: string; siren: string | null; happened_at: string
   channel: InteractionChannel; outcome: InteractionOutcome; resulting_status: RelationshipStatus
+  need_id: string | null; need_source: string | null; need_location: string | null
+  need_source_url: string | null; need_status: string | null
   offer_code: string | null; job_title: string | null; contacted_person: string | null
   note: string | null; next_action: string | null; next_action_at: string | null
-  priority_expressed: string | null; created_at: string
+  priority_expressed: string | null; next_action_mode: 'preserve' | 'replace' | 'clear'
+  applied_to_current_state: boolean; created_at: string
 }
 export type InteractionCreate = {
   request_id: string; company_key: string; happened_at: string; channel: InteractionChannel
-  outcome: InteractionOutcome; offer_code?: string; contacted_person?: string
+  outcome: InteractionOutcome; offer_code?: string; need_id?: string; contacted_person?: string
   note?: string; next_action?: string; next_action_at?: string; priority_expressed?: string
+  next_action_mode: 'preserve' | 'replace' | 'clear'
 }
 export type InteractionHistory = { items: CommercialInteraction[] }
 export type InteractionSaved = { interaction: CommercialInteraction; relationship: CommercialRelationship }
@@ -167,5 +184,6 @@ export type PhoneDraft = { type: string; target: string; opening: string | null;
 export type EmailDraft = { type: 'cold_email' | 'routing_email' | 'email_requested_after_call'; target: string; subject: string | null; body: string | null; attachment_recommendation: string; ready_to_copy: boolean; required_event: string | null }
 export type ObjectionResponse = { code: string; objection: string; response: string; objective: string; follow_up_question: string | null; use_when: string; do_not_say: string[] }
 export type CommercialAngle = { readiness: string; pack_status: ApproachStatus; active_angle: boolean; contact_rationale: string | null; entry_offer_reasons: string[]; specialty_match: string; specialty_label: string | null; specialty_reason: string; territorial_relevance: string; territorial_reason: string; primary_angle: string | null; primary_value_proposition: string | null; target_role: string | null; channel_strategy: string; internal_advice: string[]; reasons: string[]; selected_offer_code: string | null }
-export type CommercialApproachPack = { status: ApproachStatus; communication_status: CommunicationStatus; company: string; communication_title: string; entry_offer: ApproachOffer; commercial_angle: CommercialAngle; phone: PhoneDraft[]; email: EmailDraft[]; priority_objections: string[]; objections: ObjectionResponse[]; evidence: { claims_used: ApproachClaim[]; sources: string[]; warnings: string[]; do_not_claim: string[] }; internal: { advice: string[]; commercial_levers: string[]; selected_offer: string | null; unresolved_decisions: string[]; attachment_if_presentation_requested: string; attachment_if_offer_details_requested: string } }
+export type ApproachRecommendedContact = { id: number; type: string; value: string; scope: string; local_key: string | null; reach: string; person_contact_id: number | null; role: string; use: string; confidence: string; verification_status: string; commercial_relevance: string; reason_codes: string[]; source_urls: string[] }
+export type CommercialApproachPack = { status: ApproachStatus; communication_status: CommunicationStatus; company: string; communication_title: string; entry_offer: ApproachOffer; commercial_angle: CommercialAngle; phone: PhoneDraft[]; email: EmailDraft[]; priority_objections: string[]; objections: ObjectionResponse[]; evidence: { claims_used: ApproachClaim[]; sources: string[]; warnings: string[]; do_not_claim: string[] }; internal: { advice: string[]; commercial_levers: string[]; selected_offer: string | null; unresolved_decisions: string[]; attachment_if_presentation_requested: string; attachment_if_offer_details_requested: string }; recommended_contact: ApproachRecommendedContact | null; recommended_channel: string }
 export type CommercialCatalogOfferSummary = { code: string; display_name: string; enabled_for_prospecting: boolean; is_default: boolean }

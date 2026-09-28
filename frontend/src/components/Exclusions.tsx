@@ -11,7 +11,7 @@ const formatDate = (value: string | null) => value
   ? new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(value))
   : '—'
 
-export function Exclusions({ embedded = false }: { embedded?: boolean }) {
+export function Exclusions({ embedded = false, onOpenDossier }: { embedded?: boolean; onOpenDossier?: (relationshipId: number) => void }) {
   const [items, setItems] = useState<CommercialExclusion[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -124,7 +124,7 @@ export function Exclusions({ embedded = false }: { embedded?: boolean }) {
       {loading && items.length === 0 && <div className="state-card" role="status">Chargement des exclusions…</div>}
       {error && <div className="state-card error-state" role="alert"><p>{error}</p><button type="button" onClick={() => void load()}>Réessayer</button></div>}
       {!loading && !error && items.length === 0 && <div className="state-card"><h3>Aucune exclusion</h3><p>Aucune ligne ne correspond aux filtres actuels.</p></div>}
-      {!error && items.length > 0 && <div className="exclusion-list">{items.map((item) => <article className="exclusion-card" key={item.id}><div className="exclusion-card-main"><div><span className={`status-badge ${item.active ? 'active' : 'expired'}`}>{item.active ? 'Actif' : 'Expiré'}</span><h3>{item.company_name_snapshot}</h3><p>{typeLabels[item.exclusion_type]}</p></div><button type="button" className="danger-button" onClick={() => void remove(item)}>Supprimer</button></div><dl><div><dt>SIREN</dt><dd>{item.siren ?? 'Non renseigné'}</dd></div><div><dt>Raison</dt><dd>{item.reason ?? 'Non renseignée'}</dd></div><div><dt>Début</dt><dd>{formatDate(item.starts_at)}</dd></div><div><dt>Expiration</dt><dd>{formatDate(item.expires_at)}</dd></div></dl>{item.matching_basis === 'company_key' && <p className="matching-warning">Rapprochement par nom normalisé exact uniquement.</p>}</article>)}</div>}
+      {!error && items.length > 0 && <div className="exclusion-list">{items.map((item) => <article className="exclusion-card" key={item.id}><div className="exclusion-card-main"><div><span className={`status-badge ${item.active ? 'active' : 'expired'}`}>{item.active ? 'Actif' : 'Expiré'}</span><h3>{item.company_name_snapshot}</h3><p>{typeLabels[item.exclusion_type]}</p></div><div className="relationship-actions">{item.linked_relationship_id && onOpenDossier && <button type="button" className="secondary-button" onClick={() => onOpenDossier(item.linked_relationship_id!)}>Ouvrir le dossier</button>}<button type="button" className="danger-button" onClick={() => void remove(item)}>Supprimer</button></div></div><dl><div><dt>SIREN</dt><dd>{item.siren ?? 'Non renseigné'}</dd></div><div><dt>Raison</dt><dd>{item.reason ?? 'Non renseignée'}</dd></div><div><dt>Début</dt><dd>{formatDate(item.starts_at)}</dd></div><div><dt>Expiration</dt><dd>{formatDate(item.expires_at)}</dd></div></dl>{item.matching_basis === 'company_key' && <p className="matching-warning">Rapprochement par nom normalisé exact uniquement.</p>}</article>)}</div>}
     </section>
   </section>
 }

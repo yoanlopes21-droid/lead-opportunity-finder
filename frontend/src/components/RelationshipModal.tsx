@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { createCommercialRelationshipFromLead, updateCommercialRelationship } from '../api'
 import type { CommercialLead, CommercialRelationship, CommercialRelationshipInput, RelationshipStatus } from '../types'
 import { relationshipLabels } from '../interactionRules'
+import { isoToParisInput, parisInputNow, parisLocalToIso } from '../parisTime'
 
 
 export { relationshipLabels } from '../interactionRules'
@@ -9,13 +10,7 @@ export { relationshipLabels } from '../interactionRules'
 const contactDateStatuses = new Set<RelationshipStatus>(['contacted', 'awaiting_reply', 'proposal_sent', 'refused', 'wrong_contact'])
 const nextActionStatuses = new Set<RelationshipStatus>(['contacted', 'awaiting_reply', 'follow_up', 'interested', 'meeting_scheduled', 'proposal_sent', 'no_current_need', 'refused'])
 const outcomeStatuses = new Set<RelationshipStatus>(['no_current_need', 'refused', 'wrong_contact', 'do_not_contact'])
-function localValue(value: string | null | undefined) {
-  if (!value) return ''
-  const date = new Date(value)
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
-}
-const nowValue = () => localValue(new Date().toISOString())
-const asIso = (value: string) => value ? new Date(value).toISOString() : undefined
+const asIso = (value: string) => value ? parisLocalToIso(value) : undefined
 
 type Props = {
   lead?: CommercialLead
@@ -27,8 +22,8 @@ type Props = {
 
 export function RelationshipModal({ lead, relationship, initialStatus = 'contacted', onClose, onSaved }: Props) {
   const [status, setStatus] = useState<RelationshipStatus>(relationship?.status ?? initialStatus)
-  const [lastContactAt, setLastContactAt] = useState(localValue(relationship?.last_contact_at) || nowValue())
-  const [nextActionAt, setNextActionAt] = useState(localValue(relationship?.next_action_at))
+  const [lastContactAt, setLastContactAt] = useState(isoToParisInput(relationship?.last_contact_at) || parisInputNow())
+  const [nextActionAt, setNextActionAt] = useState(isoToParisInput(relationship?.next_action_at))
   const [nextAction, setNextAction] = useState(relationship?.next_action ?? '')
   const [note, setNote] = useState(relationship?.note ?? '')
   const [outcome, setOutcome] = useState(relationship?.outcome ?? '')
@@ -68,10 +63,11 @@ export function RelationshipModal({ lead, relationship, initialStatus = 'contact
 
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
     <section className="relationship-modal" role="dialog" aria-modal="true" aria-labelledby="relationship-modal-title">
-      <header><div><p className="eyebrow">SUIVI COMMERCIAL</p><h2 id="relationship-modal-title">{companyName}</h2>{lead?.siren && <p>SIREN {lead.siren}</p>}</div><button type="button" className="modal-close" onClick={onClose} aria-label="Fermer">×</button></header>
+      <header><div><p className="eyebrow">CORRECTION ADMINISTRATIVE DU SUIVI</p><h2 id="relationship-modal-title">{companyName}</h2>{lead?.siren && <p>SIREN {lead.siren}</p>}</div><button type="button" className="modal-close" onClick={onClose} aria-label="Fermer">×</button></header>
       <form onSubmit={(event) => void submit(event)}>
+        <p className="modal-policy-note">Cette action corrige l’état courant sans créer d’événement. Pour un contact réel, utilisez « Enregistrer le résultat » dans le dossier.</p>
         <label>Statut<select value={status} onChange={(event) => setStatus(event.target.value as RelationshipStatus)}>{Object.entries(relationshipLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        {contactDateStatuses.has(status) && <label>Date du dernier contact<input type="datetime-local" value={lastContactAt} onChange={(event) => setLastContactAt(event.target.value)} required /></label>}
+        {contactDateStatuses.has(status) && <label>Date du dernier contact <span>(Europe/Paris)</span><input type="datetime-local" value={lastContactAt} onChange={(event) => setLastContactAt(event.target.value)} required /></label>}
         {nextActionStatuses.has(status) && <><label>Action à effectuer <span>(facultatif)</span><input value={nextAction} onChange={(event) => setNextAction(event.target.value)} maxLength={255} /></label><label>{nextLabel}<input type="datetime-local" value={nextActionAt} onChange={(event) => setNextActionAt(event.target.value)} required={nextRequired} /></label></>}
         {outcomeStatuses.has(status) && <label>Motif / résultat <span>(facultatif)</span><input value={outcome} onChange={(event) => setOutcome(event.target.value)} maxLength={500} /></label>}
         {lead && (lead.contacts.length > 0 || lead.people.length > 0) && <label>Contact ou canal réellement utilisé <span>(facultatif)</span><select value={contactReference} onChange={(event) => setContactReference(event.target.value)}><option value="">Non renseigné</option>{lead.contacts.filter((item) => !item.stale && item.verification_status !== 'rejected').map((item) => <option key={`contact-${item.id}`} value={`contact:${item.id}`}>{item.type === 'email' ? 'Email' : item.type === 'phone' ? 'Téléphone' : item.type === 'website' ? 'Site web' : 'Canal'} — {item.value}</option>)}{lead.people.map((item) => <option key={`person-${item.id}`} value={`person:${item.id}`}>{item.display_name}{item.role_title ? ` — ${item.role_title}` : ''}</option>)}</select></label>}

@@ -1,10 +1,11 @@
-import type { BraveUsage, CommercialApproachPack, CommercialCatalogOfferSummary, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, InteractionCreate, InteractionHistory, InteractionSaved, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecentCommercialLeadPage, RecentLeadKind, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
+import type { BraveUsage, CommercialApproachPack, CommercialCatalogOfferSummary, CommercialDossier, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, InteractionCreate, InteractionHistory, InteractionSaved, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecentCommercialLeadPage, RecentLeadKind, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
 
 export const API_BASE_URL = 'http://127.0.0.1:8000'
 
-export function fetchApproachPack(companyKey: string, department: string, offerCode?: string): Promise<CommercialApproachPack> {
+export function fetchApproachPack(companyKey: string, department: string, offerCode?: string, needId?: string): Promise<CommercialApproachPack> {
   const params = new URLSearchParams({ department })
   if (offerCode) params.set('offer_code', offerCode)
+  if (needId) params.set('need_id', needId)
   return readJson<CommercialApproachPack>(`/api/v1/commercial-leads/${encodeURIComponent(companyKey)}/approach-pack?${params}`)
 }
 
@@ -103,6 +104,28 @@ export function fetchCommercialRelationships(view: string, search = ''): Promise
   const params = new URLSearchParams({ view })
   if (search.trim()) params.set('search', search.trim())
   return readJson<CommercialRelationshipPage>(`/api/v1/commercial-relationships?${params}`)
+}
+
+export function fetchCommercialDossier(relationshipId: number): Promise<CommercialDossier> {
+  return readJson<CommercialDossier>(`/api/v1/commercial-relationships/${relationshipId}/dossier`)
+}
+
+export function addHumanContact(relationshipId: number, input: {
+  channel_type: 'phone' | 'email' | 'professional_url' | 'other'; value: string
+  person_name?: string; role_title?: string; verified_at: string
+  provenance: 'switchboard' | 'contact_person' | 'other'
+}): Promise<{ contact_point_id: number; person_contact_id: number | null }> {
+  return readJson(`/api/v1/commercial-relationships/${relationshipId}/human-contacts`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  })
+}
+
+export function addNeedVerification(relationshipId: number, input: {
+  need_id: string; verified_at: string; channel: string; note?: string
+}): Promise<{ id: number }> {
+  return readJson(`/api/v1/commercial-relationships/${relationshipId}/need-verifications`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  })
 }
 
 export function fetchInteractionHistory(companyKey: string): Promise<InteractionHistory> {

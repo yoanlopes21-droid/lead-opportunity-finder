@@ -38,7 +38,7 @@ export function scriptText(draft: PhoneDraft, priority: ObjectionResponse[]): st
   return [
     draft.opening, draft.first_30_seconds, draft.continuation,
     draft.qualification_questions.length ? `Questions :\n${draft.qualification_questions.map((question) => `• ${question}`).join('\n')}` : null,
-    draft.meeting_transition ? `Transition RDV :\n${draft.meeting_transition}` : null,
+    draft.meeting_transition ? `Transition RDV :\n${draft.meeting_transition_after_response ?? draft.meeting_transition}` : null,
     priority.length ? `Objections prioritaires :\n${priority.map((item) => `• ${item.objection}\n${item.response}`).join('\n\n')}` : null,
   ].filter(Boolean).join('\n\n')
 }

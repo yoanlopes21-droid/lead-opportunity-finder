@@ -15,8 +15,11 @@ const { InteractionPanel } = await import(pathToFileURL(output).href)
 
 const event = (outcome = 'wrong_contact') => ({ id: 1, company_key: 'acme sas', siren: null,
   happened_at: new Date().toISOString(), channel: 'phone', outcome, resulting_status: 'wrong_contact',
+  need_id: 'france_travail:offer-acme', need_source: 'france_travail', need_location: 'Créteil',
+  need_source_url: 'https://source.test/offer', need_status: null,
   offer_code: 'starter', job_title: 'Technicien', contacted_person: null, note: null,
-  next_action: null, next_action_at: null, priority_expressed: null, created_at: new Date().toISOString() })
+  next_action: null, next_action_at: null, priority_expressed: null,
+  next_action_mode: 'preserve', applied_to_current_state: true, created_at: new Date().toISOString() })
 const response = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
 const button = (root, label) => root.findAllByType('button').find((node) => node.children.includes(label))
 const texts = (node) => JSON.stringify(node.toJSON())
@@ -89,14 +92,17 @@ test('server error keeps the form open and disabled prospecting prevents opening
 test('callback keeps the user supplied next action and date', async () => {
   const view = await mount()
   await act(async () => { button(view.tree.root, 'Enregistrer le résultat').props.onClick() })
-  const selects = view.tree.root.findAllByType('select')
-  await act(async () => { selects[0].props.onChange({ target: { value: 'phone' } }); selects[1].props.onChange({ target: { value: 'callback_requested' } }); selects[2].props.onChange({ target: { value: 'Rappeler' } }) })
+  let selects = view.tree.root.findAllByType('select')
+  await act(async () => { selects[0].props.onChange({ target: { value: 'phone' } }); selects[1].props.onChange({ target: { value: 'callback_requested' } }); selects[2].props.onChange({ target: { value: 'replace' } }) })
+  selects = view.tree.root.findAllByType('select')
+  await act(async () => { selects[3].props.onChange({ target: { value: 'Rappeler' } }) })
   assert.match(texts(view.tree), /Ajoutez une date de rappel/)
   const dateInputs = view.tree.root.findAllByType('input').filter((node) => node.props.type === 'datetime-local')
   await act(async () => { dateInputs[1].props.onChange({ target: { value: '2026-10-01T14:00' } }) })
   await act(async () => { view.tree.root.findByType('form').props.onSubmit({ preventDefault() {} }) })
   const sent = JSON.parse(view.requests[1].init.body)
   assert.equal(sent.next_action, 'Rappeler')
+  assert.equal(sent.next_action_mode, 'replace')
   assert.ok(sent.next_action_at.startsWith('2026-10-01T'))
   view.tree.unmount()
 })

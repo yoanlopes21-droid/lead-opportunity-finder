@@ -48,3 +48,9 @@ test('copied script contains usable speech and no internal metadata', () => {
   assert.match(text, /Je comprends\./)
   assert.doesNotMatch(text, /ready_to_copy|communication_status|claims_used/)
 })
+test('copied script uses the same confirmed-priority transition as the workspace', () => {
+  const customized = { ...phone, meeting_transition_after_response: 'Transition personnalisée.' }
+  const text = scriptText(customized, [])
+  assert.match(text, /Transition personnalisée\./)
+  assert.doesNotMatch(text, /Prenons rendez-vous\./)
+})

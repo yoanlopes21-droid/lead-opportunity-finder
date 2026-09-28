@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models import CommercialRelationship, ObservedJobOffer
+from app.models import CommercialNeedVerification, CommercialRelationship, ObservedJobOffer
 from app.services.commercial_leads.service import CommercialLead, get_commercial_lead
 from app.services.contactability.contracts import (
     ContactConfidence, ContactScope, ContactTarget, ContactType, VerificationStatus,
@@ -132,6 +132,7 @@ def get_commercial_approach_context(
     session: Session, company_key: str, department_code: str = "94",
     now: Optional[datetime] = None,
     specialty_priority: Optional[Callable[[str], int]] = None,
+    selected_need_id: Optional[str] = None,
 ) -> Optional[CommercialApproachContext]:
     """Read one existing lead and its minimal supporting records without I/O."""
     observed_at = now or datetime.now(timezone.utc)
@@ -140,9 +141,17 @@ def get_commercial_approach_context(
         return None
     descriptions = _offer_descriptions(session, lead)
     history = _relationship_history(session, lead)
+    verified_need_ids = frozenset(session.scalars(select(CommercialNeedVerification.need_id).where(
+        CommercialNeedVerification.scope == "need_exists",
+        or_(
+            CommercialNeedVerification.company_key == lead.company_key,
+            CommercialNeedVerification.siren == lead.siren if lead.siren else False,
+        ),
+    )))
     return build_commercial_approach_context(
         lead, descriptions=descriptions, history=history, now=observed_at,
-        specialty_priority=specialty_priority,
+        specialty_priority=specialty_priority, selected_need_id=selected_need_id,
+        verified_need_ids=verified_need_ids,
     )
 
 
@@ -152,6 +161,8 @@ def build_commercial_approach_context(
     history: tuple[ApproachHistory, ...] = (),
     now: Optional[datetime] = None,
     specialty_priority: Optional[Callable[[str], int]] = None,
+    selected_need_id: Optional[str] = None,
+    verified_need_ids: frozenset[str] = frozenset(),
 ) -> CommercialApproachContext:
     """Pure composition from an already assembled lead and optional read facts."""
     if not lead.active_job_offers:
@@ -160,9 +171,12 @@ def build_commercial_approach_context(
     descriptions = descriptions or {}
     entry, selection_reasons = _select_entry_offer(
         lead.active_job_offers, lead.company_name, descriptions, specialty_priority,
+        selected_need_id,
     )
     description = descriptions.get(_offer_key(entry))
     entry_warnings = _offer_warnings(entry, description, observed_at)
+    if _offer_key(entry) in verified_need_ids:
+        entry_warnings = tuple(item for item in entry_warnings if item != "last_observation_over_7_days")
     attribution, employer_reasons = _employer_attribution(lead, descriptions)
     contacts, preferred_id, preferred_channel, preferred_person_id, target_type, contact_reasons = _contacts_for_entry(lead, entry)
     preferred = next((item for item in contacts if item.id == preferred_id), None)
@@ -297,6 +311,7 @@ def _offer_key(offer: ActiveJobOffer) -> str:
 def _select_entry_offer(
     offers: tuple[ActiveJobOffer, ...], company_name: str, descriptions: dict[str, str],
     specialty_priority: Optional[Callable[[str], int]] = None,
+    selected_need_id: Optional[str] = None,
 ) -> tuple[ActiveJobOffer, tuple[str, ...]]:
     def quality(offer: ActiveJobOffer) -> tuple:
         description = descriptions.get(_offer_key(offer))
@@ -311,8 +326,11 @@ def _select_entry_offer(
             -(age if age is not None else 100000),
             -offer.first_seen_at.timestamp(),
         )
-    selected = max(offers, key=lambda item: (quality(item), item.title.casefold(), _offer_key(item)))
+    requested = next((item for item in offers if _offer_key(item) == selected_need_id), None)
+    selected = requested or max(offers, key=lambda item: (quality(item), item.title.casefold(), _offer_key(item)))
     reasons = ["canonical_need_selected"]
+    if requested is not None:
+        reasons.append("canonical_need_selected_by_user")
     if selected.display_location:
         reasons.append("job_location_available")
     if selected.source_urls:

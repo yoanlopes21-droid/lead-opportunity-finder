@@ -17,7 +17,7 @@ from app.services.commercial_configuration import (
     CommercialOffer, CommercialPolicy, CommercialProfile, list_offers, read_policy, read_profile,
 )
 from app.services.commercial_leads.angle import AngleClaim, CommercialAngle, build_commercial_angle, specialty_for_role
-from app.services.commercial_leads.approach import ApproachOffer, CommercialApproachContext, get_commercial_approach_context
+from app.services.commercial_leads.approach import ApproachContact, ApproachOffer, CommercialApproachContext, get_commercial_approach_context
 
 
 @dataclass(frozen=True)
@@ -87,6 +87,8 @@ class CommercialApproachPack:
     objections: tuple[ObjectionResponse, ...]
     evidence: PackEvidence
     internal: PackInternal
+    recommended_contact: Optional[ApproachContact] = None
+    recommended_channel: str = "none"
 
 
 def _inline(value: str, limit: int = 120) -> str:
@@ -413,25 +415,33 @@ def build_commercial_approach_pack(
         priority_objections=_priority_codes(angle) if objections else (), objections=objections,
         evidence=PackEvidence(claims, tuple(dict.fromkeys(c.source_reference for c in claims)),
                               warnings, angle.do_not_claim), internal=internal,
+        recommended_contact=next((item for item in context.contacts if item.id == context.recommended_contact_id), None),
+        recommended_channel=context.recommended_channel,
     )
 
 
 def get_commercial_approach_pack(
     session: Session, company_key: str, department_code: str = "94", now: Optional[datetime] = None,
-    selected_offer_code: Optional[str] = None,
+    selected_offer_code: Optional[str] = None, selected_need_id: Optional[str] = None,
 ) -> Optional[CommercialApproachPack]:
     profile = read_profile(session)
     catalog: tuple[CommercialOffer, ...] = tuple(list_offers(session))
     policy: Optional[CommercialPolicy] = read_policy(session)
     priority = lambda title: int(specialty_for_role(title, profile)[0] == "strong_specialty_match")
-    context = get_commercial_approach_context(session, company_key, department_code, now, specialty_priority=priority)
+    context = get_commercial_approach_context(
+        session, company_key, department_code, now,
+        specialty_priority=priority, selected_need_id=selected_need_id,
+    )
     if context is None:
         return None
     angle = build_commercial_angle(context, profile, catalog, policy, selected_offer_code)
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
     from app.models import CommercialInteraction
+    need_id = f"{context.entry_offer.source}:{context.entry_offer.offer_id}"
     latest = session.scalar(select(CommercialInteraction).where(
-        CommercialInteraction.company_key == company_key,
+        or_(CommercialInteraction.company_key == company_key,
+            CommercialInteraction.siren == context.siren if context.siren else False),
+        CommercialInteraction.need_id == need_id,
     ).order_by(CommercialInteraction.happened_at.desc(), CommercialInteraction.id.desc()).limit(1))
     return build_commercial_approach_pack(
         context, angle, profile,

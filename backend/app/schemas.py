@@ -2,7 +2,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _utc_if_naive(value):
+    if isinstance(value, datetime) and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 class HealthResponse(BaseModel):
@@ -393,6 +399,7 @@ class CommercialExclusionManagementResponse(CommercialExclusionResponse):
     active: bool
     status: str
     matching_basis: str
+    linked_relationship_id: Optional[int] = None
 
 
 class CommercialExclusionListResponse(BaseModel):
@@ -464,6 +471,11 @@ class CommercialRelationshipResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     follow_up_timing: Optional[str] = None
+
+    @field_validator("last_contact_at", "next_action_at", "created_at", "updated_at", mode="before")
+    @classmethod
+    def attach_utc_to_sqlite_datetimes(cls, value):
+        return _utc_if_naive(value)
 
 
 class CommercialRelationshipListResponse(BaseModel):

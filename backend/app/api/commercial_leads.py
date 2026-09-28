@@ -50,12 +50,16 @@ def get_approach_pack(
     company_key: str,
     department: Annotated[str, Query(min_length=1)] = "94",
     offer_code: Optional[str] = None,
+    need_id: Optional[str] = None,
     session: Session = Depends(get_db),
 ) -> CommercialApproachPack:
     """Compose local drafts and evidence; never contact a prospect or mutate data."""
     if offer_code and not any(offer.code == offer_code and offer.enabled_for_prospecting for offer in list_offers(session)):
         raise HTTPException(status_code=422, detail="Offer is not enabled for prospecting")
-    pack = get_commercial_approach_pack(session, company_key, department, selected_offer_code=offer_code)
+    pack = get_commercial_approach_pack(
+        session, company_key, department,
+        selected_offer_code=offer_code, selected_need_id=need_id,
+    )
     if pack is None:
         raise HTTPException(status_code=404, detail="Commercial lead not found")
     return pack
@@ -65,10 +69,11 @@ def get_approach_pack(
 def get_approach_context(
     company_key: str,
     department: Annotated[str, Query(min_length=1)] = "94",
+    need_id: Optional[str] = None,
     session: Session = Depends(get_db),
 ) -> CommercialApproachContextResponse:
     """Inspect reliable commercial inputs for one existing lead; no discovery or writes."""
-    context = get_commercial_approach_context(session, company_key, department)
+    context = get_commercial_approach_context(session, company_key, department, selected_need_id=need_id)
     if context is None:
         raise HTTPException(status_code=404, detail="Commercial lead not found")
     return CommercialApproachContextResponse.model_validate(asdict(context))
