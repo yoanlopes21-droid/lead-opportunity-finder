@@ -1,6 +1,6 @@
 # Développement local
 
-Prérequis constatés : Python 3.9.6 et Node 25.8.2.
+Prérequis : Python 3.9 ou plus récent et une version Node compatible avec le `package-lock.json`.
 
 ## Backend
 
@@ -21,6 +21,9 @@ npm run dev
 ```
 
 L'interface est disponible sur `http://localhost:5173`.
+Vite transmet les appels `/api` au backend sur `127.0.0.1:8000`.
+
+Le mode quotidien mono-processus et le launcher macOS sont documentés dans `docs/local-operations.md`.
 
 ## Tests
 
@@ -31,3 +34,10 @@ cd backend
 
 Pour une configuration locale, copier `.env.example` en `.env` et adapter les valeurs sans y placer de secrets dans Git.
 
+Pour préparer le build servi par FastAPI en mode quotidien :
+
+```bash
+cd frontend
+npm ci
+npm run build
+```

@@ -7,12 +7,13 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.models import BraveUsageEvent, CommercialExclusion, CommercialRelationship, ContactEvidence, ContactPoint, ObservedJobOffer, SearchRunItem, VerifiedWebsiteRecord
+from app.models import BraveUsageEvent, CommercialExclusion, CommercialRelationship, ContactEvidence, ContactPoint, ObservedJobOffer, SearchRun, SearchRunItem, VerifiedWebsiteRecord
 from app.services.commercial_leads.exclusions import ExclusionType
 from app.services.brave_usage import BraveBudgetExceeded, BraveBudgetPolicy, BraveUsageService
 from app.services.search_runs import (
-    OfficialWebSearchEnricher, SearchRunCompletionReason, SearchRunItemStatus,
-    SearchRunOrchestrator, SearchRunStatus, ensure_search_run_schema, is_actionable_lead,
+    INTERRUPTED_RESTART_MESSAGE, OfficialWebSearchEnricher, SearchRunCompletionReason,
+    SearchRunItemStatus, SearchRunOrchestrator, SearchRunStatus,
+    ensure_search_run_schema, is_actionable_lead, recover_orphaned_search_runs,
 )
 from app.services.contactability.contracts import ContactScope
 from app.services.contactability.providers.official_web.contracts import WebsiteVerificationStatus
@@ -186,6 +187,57 @@ def test_stop_and_resume_are_idempotent_and_keep_partial_results(session):
     assert completed.current_actionable_leads == 1
     again = runner.resume(session, run.id)
     assert again.current_actionable_leads == 1
+
+
+@pytest.mark.parametrize("orphan_status", [
+    SearchRunStatus.QUEUED,
+    SearchRunStatus.RUNNING,
+    SearchRunStatus.STOPPING,
+])
+def test_startup_recovers_orphaned_search_run_without_losing_partial_results(session, orphan_status):
+    offer(session, "partial")
+    offer(session, "processing")
+    runner = SearchRunOrchestrator(clock=lambda: NOW)
+    run = runner.create(session, requested_actionable_leads=2)
+    items = session.scalars(select(SearchRunItem).where(
+        SearchRunItem.run_id == run.id,
+    ).order_by(SearchRunItem.selection_position)).all()
+    items[0].status = SearchRunItemStatus.ACTIONABLE
+    items[0].actionable = True
+    items[0].finished_at = NOW
+    items[1].status = SearchRunItemStatus.PROCESSING
+    items[1].started_at = NOW
+    run.status = orphan_status
+    run.stop_requested = orphan_status == SearchRunStatus.STOPPING
+    run.current_company_key = items[1].company_key
+    session.commit()
+
+    assert recover_orphaned_search_runs(session, clock=lambda: NOW + timedelta(minutes=1)) == 1
+    session.refresh(run)
+    assert run.status == SearchRunStatus.STOPPED
+    assert run.stop_requested is False
+    assert run.completion_reason == SearchRunCompletionReason.INTERRUPTED_RESTART
+    assert run.error_summary == INTERRUPTED_RESTART_MESSAGE
+    assert items[0].status == SearchRunItemStatus.ACTIONABLE
+    assert items[0].actionable is True
+    assert items[1].status == SearchRunItemStatus.PENDING
+    assert items[1].started_at is None
+
+
+def test_startup_search_run_recovery_is_idempotent_and_never_calls_enricher(session):
+    offer(session, "orphan")
+    enricher = AddActionableContact()
+    runner = SearchRunOrchestrator(enricher, clock=lambda: NOW)
+    run = runner.create(session, requested_actionable_leads=1)
+    run.status = SearchRunStatus.RUNNING
+    session.commit()
+
+    assert recover_orphaned_search_runs(session, clock=lambda: NOW) == 1
+    first_finished_at = run.finished_at
+    assert recover_orphaned_search_runs(session, clock=lambda: NOW + timedelta(days=1)) == 0
+    session.refresh(run)
+    assert run.finished_at == first_finished_at
+    assert enricher.calls == []
 
 
 def test_brave_ledger_is_counted_once_per_run_and_natural_offer_age_never_calls_enricher(session):

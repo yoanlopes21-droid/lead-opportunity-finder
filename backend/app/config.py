@@ -6,7 +6,10 @@ from decimal import Decimal
 from typing import Optional
 
 from pydantic import SecretStr
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.local_operations import resolve_database_url
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -51,6 +54,11 @@ class Settings(BaseSettings):
         env_prefix="LEAD_FINDER_",
         extra="ignore",
     )
+
+    @field_validator("database_url", mode="after")
+    @classmethod
+    def canonical_database_url(cls, value: str) -> str:
+        return resolve_database_url(value, PROJECT_ROOT)
 
     @property
     def cors_origin_list(self) -> list[str]:

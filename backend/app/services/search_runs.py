@@ -50,6 +50,10 @@ class SearchRunCompletionReason:
     CANDIDATES_EXHAUSTED = "candidates_exhausted"
     STOPPED = "stopped"
     FAILED = "failed"
+    INTERRUPTED_RESTART = "interrupted_restart"
+
+
+INTERRUPTED_RESTART_MESSAGE = "Interrompue lors du redémarrage de l’application"
 
 
 _TERMINAL = {
@@ -136,6 +140,43 @@ def ensure_search_run_schema(engine: Engine) -> None:
                 if name not in existing:
                     connection.exec_driver_sql(f"ALTER TABLE search_runs ADD COLUMN {name} {ddl}")
     SearchRunItem.__table__.create(bind=engine, checkfirst=True)
+
+
+def recover_orphaned_search_runs(
+    session: Session,
+    *,
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> int:
+    """Stop runs whose in-process worker disappeared during a previous execution.
+
+    Recovery only updates orchestration state. It never invokes an enricher or
+    any external provider, and a second call is a no-op.
+    """
+    runs = session.scalars(select(SearchRun).where(SearchRun.status.in_((
+        SearchRunStatus.QUEUED,
+        SearchRunStatus.RUNNING,
+        SearchRunStatus.STOPPING,
+    )))).all()
+    if not runs:
+        return 0
+    recovered_at = clock()
+    for run in runs:
+        for item in session.scalars(select(SearchRunItem).where(
+            SearchRunItem.run_id == run.id,
+            SearchRunItem.status == SearchRunItemStatus.PROCESSING,
+        )):
+            item.status = SearchRunItemStatus.PENDING
+            item.started_at = None
+        run.status = SearchRunStatus.STOPPED
+        run.stop_requested = False
+        run.finished_at = recovered_at
+        run.error_summary = INTERRUPTED_RESTART_MESSAGE
+        run.current_company_key = None
+        run.current_company_name = None
+        run.current_step = "interrupted_restart"
+        run.completion_reason = SearchRunCompletionReason.INTERRUPTED_RESTART
+    session.commit()
+    return len(runs)
 
 
 def is_actionable_lead(lead: CommercialLead) -> bool:

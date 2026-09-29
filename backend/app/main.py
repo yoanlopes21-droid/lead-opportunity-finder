@@ -2,8 +2,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.config import get_settings
@@ -20,7 +21,7 @@ from app.api.job_offer_refresh_runs import router as job_offer_refresh_runs_rout
 from app.api.source_boards import router as source_boards_router
 from app.api.open_web_runs import router as open_web_runs_router
 from app.api.recruitment_signals import router as recruitment_signals_router
-from app.services.search_runs import ensure_search_run_schema
+from app.services.search_runs import ensure_search_run_schema, recover_orphaned_search_runs
 from app.services.commercial_interactions import ensure_commercial_interaction_schema
 from app.services.persistence.offers import ensure_collection_run_schema
 from app.services.job_offer_refresh_runs import recover_orphaned_refresh_runs
@@ -29,18 +30,22 @@ from app.services.open_web_runs import recover_orphaned_open_web_runs
 from app.services.collection.open_web import reconcile_recruitment_signal_quality
 from app.schemas import AppSummary, FranceTravailAuthCheckResponse, HealthResponse
 from app.services.france_travail.auth import FranceTravailAuthError, FranceTravailOAuthClient
+from app.local_operations import sqlite_database_path
 
 settings = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Path(settings.database_url.removeprefix("sqlite:///"),).parent.mkdir(parents=True, exist_ok=True)
+    database_path = sqlite_database_path(settings.database_url)
+    if database_path is not None:
+        database_path.parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
     ensure_commercial_interaction_schema(engine)
     ensure_search_run_schema(engine)
     ensure_collection_run_schema(engine)
     with SessionLocal() as session:
+        recover_orphaned_search_runs(session)
         reconcile_recruitment_signal_quality(session)
         recover_orphaned_refresh_runs(session)
         recover_orphaned_board_runs(session)
@@ -70,9 +75,10 @@ app.include_router(recruitment_signals_router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse, tags=["system"])
-def health() -> HealthResponse:
+def health(response: Response) -> HealthResponse:
     with engine.connect() as connection:
         connection.execute(text("SELECT 1"))
+    response.headers["X-Lead-Opportunity-Finder"] = "local-v1"
     return HealthResponse(status="ok", database="connected")
 
 
@@ -112,3 +118,9 @@ def check_france_travail_authentication() -> FranceTravailAuthCheckResponse:
         status="authenticated",
         message="France Travail authentication succeeded. No job search was performed.",
     )
+
+
+frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+if frontend_dist.is_dir():
+    # API routes are registered first; this final mount owns only the local UI.
+    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")

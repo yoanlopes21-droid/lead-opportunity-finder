@@ -8,6 +8,7 @@ def test_health_endpoint_reports_database_connection():
         response = client.get("/api/v1/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "database": "connected"}
+    assert response.headers["X-Lead-Opportunity-Finder"] == "local-v1"
 
 
 def test_summary_confirms_v1_safety_boundaries():

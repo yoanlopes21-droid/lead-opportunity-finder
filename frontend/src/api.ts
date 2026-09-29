@@ -1,6 +1,7 @@
 import type { BraveUsage, CommercialApproachPack, CommercialCatalogOfferSummary, CommercialDossier, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, InteractionCreate, InteractionHistory, InteractionSaved, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecentCommercialLeadPage, RecentLeadKind, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
 
-export const API_BASE_URL = 'http://127.0.0.1:8000'
+// Production is same-origin (FastAPI serves dist); Vite development uses its proxy.
+export const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? ''
 
 export function fetchApproachPack(companyKey: string, department: string, offerCode?: string, needId?: string): Promise<CommercialApproachPack> {
   const params = new URLSearchParams({ department })

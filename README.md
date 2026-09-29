@@ -10,6 +10,8 @@ Le projet comprend une API FastAPI, une base SQLite locale et une interface Reac
 
 Voir les instructions détaillées dans `docs/development.md`.
 
+Pour l’usage quotidien sans Terminal, le launcher macOS, les sauvegardes, la restauration et le changement de Mac, voir `docs/local-operations.md`.
+
 ## Principes V1
 
 - Données, preuves et analyses restent séparées.
