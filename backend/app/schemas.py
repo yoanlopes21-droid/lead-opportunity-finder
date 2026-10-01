@@ -72,6 +72,7 @@ class SearchRunProgressResponse(BaseModel):
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
     error_summary: Optional[str]
+    funnel_stats: dict = Field(default_factory=dict)
 
 
 class SearchRunResponse(SearchRunProgressResponse):

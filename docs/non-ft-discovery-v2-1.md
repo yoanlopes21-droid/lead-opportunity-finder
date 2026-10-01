@@ -35,3 +35,42 @@ Un board ATS actif a son propre refresh complet ; seule sa portée peut désacti
 Nouveautés propose les filtres Toutes, Hors France Travail, France Travail, Employeur direct et ATS, un compteur hors FT et des badges de provenance sur la LeadCard. Les mêmes exclusions, cartes, actions de contact et suivi sont utilisés. L'export Excel ajoute la provenance principale, le statut hors FT et les sources observées. Sources propose le run manuel et les deux nouveaux types de boards.
 
 La couverture dépend de domaines officiels confirmés, de pages publiques structurées et de boards réellement associés à l'employeur. Les sites qui ne publient qu'en HTML non structuré, les offres sans localisation du poste et les liens ATS ambigus restent des signaux. Le pilote local et ses données commerciales restent dans un rapport ignoré par Git ; ni base ni secret ne sont versionnés. La base et la configuration V1 ne sont jamais migrées par cette branche.
+# Résolution de domaines RNE (V2.1, facultative)
+
+La source est l'API **Data INPI / Registre national des entreprises**, et non
+l'endpoint « attestation d'immatriculation » d'API Entreprise. La documentation
+officielle *Accéder aux formalités données saisies JSON*, version 5.0 (août
+2026), décrit `POST /api/sso/login` (identifiant/mot de passe, jeton Bearer),
+`GET /api/companies/{siren}` et les objets JSON
+`content.personneMorale.identite.nomsDeDomaine[]` et
+`content.personneMorale.{etablissementPrincipal,autresEtablissements}.nomsDeDomaine[]`.
+Chaque objet contient `nomDomaine` et éventuellement `dateEffet`. La réponse
+réelle de `GET /api/companies/{siren}` observée en octobre 2026 enveloppe ces
+données sous `formality.content`, avec `diffusionCommerciale` et
+`diffusionINSEE` dans `formality` et `updatedAt` à la racine. Le parseur accepte
+aussi la forme directe `content` montrée dans l'annexe officielle et exige le
+même SIREN dans les deux niveaux lorsque l'enveloppe est présente.
+
+Source : https://www.inpi.fr/sites/default/files/2026-08/documentation%20technique%20API%20formalite%CC%81s_v5.0-AA.pdf
+Licence : https://www.inpi.fr/sites/default/files/Licence%20donn%C3%A9es%20RNE_2024_0.pdf
+
+Le compte et le mot de passe se configurent dans le `.env` **local ignoré** :
+`LEAD_FINDER_INPI_USERNAME` et `LEAD_FINDER_INPI_PASSWORD`. Sans eux, la
+découverte continue avec le cache et Brave. La documentation signale une
+limite journalière (HTTP 429) sans chiffre universel ; les requêtes sont ciblées
+par SIREN et bornées à 20 consultations par run. Les absences ou domaines non
+validés sont conservés 30 jours pour éviter de réinterroger les mêmes SIREN.
+Le run distingue une réponse HTTP 404, une fiche non réutilisable, une fiche
+réutilisable sans `nomDomaine`, et un domaine déclaré candidat. Ces catégories
+ne sont pas additionnées sous « domaine absent ». Le cache des liens officiels
+déjà rencontrés est vérifié même si le budget Brave du run vaut zéro.
+Les sociétés marquées `diffusionINSEE=N` ou
+`diffusionCommerciale=false` sont ignorées. Les données de personne physique
+ne sont pas utilisées pour cette résolution commerciale.
+
+Un domaine déclaré est enregistré avec sa source, son SIREN/SIRET, la date
+RNE disponible et la date de vérification locale. Il reste un candidat jusqu'à
+ce que le site soit accessible et que l'identité concorde. Un domaine vérifié
+différent n'est jamais remplacé automatiquement. Les statistiques du funnel
+sont disponibles sur `funnel_stats` des runs de découverte hors FT ; les
+compteurs sont des indicateurs d'étapes, pas une vérité terrain exhaustive.

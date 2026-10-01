@@ -40,6 +40,7 @@ def source_run_response(run: CollectionRun) -> SourceRefreshRunResponse:
         target_signal_count=run.target_signal_count, brave_hard_cap=run.brave_hard_cap,
         stop_requested=run.stop_requested, completion_reason=run.completion_reason,
         error_summary=run.error_summary,
+        funnel_stats=run.funnel_stats or {},
     )
 
 

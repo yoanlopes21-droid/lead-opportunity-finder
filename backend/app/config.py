@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     societe_com_contact_ttl_days: int = 30
     societe_com_directors_ttl_days: int = 90
     brave_search_api_key: Optional[SecretStr] = None
+    inpi_username: Optional[SecretStr] = None
+    inpi_password: Optional[SecretStr] = None
     brave_search_api_url: str = "https://api.search.brave.com/res/v1/web/search"
     brave_search_timeout_seconds: float = 10.0
     brave_search_requests_per_second: float = 1.0

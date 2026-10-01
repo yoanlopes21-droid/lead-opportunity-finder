@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import httpx
-import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -135,24 +134,8 @@ def inspect_seed(session: Session, seed: CompanyDiscoverySeed) -> tuple[int, int
     seed.official_site_url = site
     seed.site_status = "high_confidence"
     seed.career_pages = list(provider.career_pages)
-    ats_rows = []
-    ats_new = 0
-    company_slug = re.sub(r"[^a-z0-9]+", "", seed.company_name.casefold())
-    for source, identifier in provider.ats_candidates:
-        high = len(provider.ats_candidates) == 1 and re.sub(r"[^a-z0-9]+", "", identifier.casefold()) == company_slug
-        status = "high_confidence" if high else "review_required"
-        ats_rows.append({"provider": source, "identifier": identifier, "status": status})
-        if high:
-            try:
-                board = create_board(session, provider_id=source, display_name=f"{seed.company_name} · {source}",
-                                     board_identifier=identifier, company_name_hint=seed.company_name)
-                child, created = create_board_refresh_run(session, board)
-                if created:
-                    run_board_refresh(session, board.id, child.id)
-                    session.refresh(child)
-                    ats_new += child.offers_new if child.status == "completed" else 0
-            except DuplicateBoardError:
-                pass
+    seed.offer_diagnostics = dict(provider.jobposting_stats)
+    ats_rows, ats_new = attach_ats_candidates(session, seed.company_name, provider.ats_candidates)
     seed.ats_candidates = ats_rows
     seed.status = "inspected"
     seed.last_inspected_at = now
@@ -160,3 +143,31 @@ def inspect_seed(session: Session, seed: CompanyDiscoverySeed) -> tuple[int, int
     seed.last_result = f"{result.offers_received} offre(s) directes ; {len(provider.ats_candidates)} ATS candidat(s)"
     session.commit()
     return result.offers_new + ats_new, len(provider.ats_candidates)
+
+
+def attach_ats_candidates(session: Session, company_name: str,
+                          candidates: tuple[tuple[str, str], ...]) -> tuple[list[dict], int]:
+    ats_rows = []
+    ats_new = 0
+    provider_counts = {source: sum(1 for item in candidates if item[0] == source)
+                       for source in {item[0] for item in candidates}}
+    for source, identifier in candidates:
+        # A unique link on the verified employer site is direct association
+        # evidence, even when the ATS slug abbreviates the legal name.
+        high = provider_counts[source] == 1
+        status = "high_confidence" if high else "review_required"
+        ats_rows.append({"provider": source, "identifier": identifier, "status": status})
+        if high:
+            try:
+                board = create_board(session, provider_id=source, display_name=f"{company_name} · {source}",
+                                     board_identifier=identifier, company_name_hint=company_name)
+                child, created = create_board_refresh_run(session, board)
+                if created:
+                    run_board_refresh(session, board.id, child.id)
+                    session.refresh(child)
+                    ats_new += child.offers_new if child.status == "completed" else 0
+                    if child.status != "completed":
+                        ats_rows[-1]["status"] = "review_required"
+            except DuplicateBoardError:
+                pass
+    return ats_rows, ats_new

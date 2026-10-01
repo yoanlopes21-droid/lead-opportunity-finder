@@ -66,9 +66,15 @@ def _date(value):
         return None
 
 
-def parse_jobpostings(html: str, page_url: str, company_name: str, official_domain: str, *, now: datetime | None = None) -> tuple[OfferSnapshot, ...]:
+def parse_jobpostings(html: str, page_url: str, company_name: str, official_domain: str, *,
+                      now: datetime | None = None, diagnostics: dict[str, int] | None = None) -> tuple[OfferSnapshot, ...]:
     """Reject third-party, stale, unattributed and geographically uncertain postings."""
+    def mark(key: str):
+        if diagnostics is not None:
+            diagnostics[key] = diagnostics.get(key, 0) + 1
+
     if (urlsplit(page_url).hostname or "").casefold() != official_domain.casefold():
+        mark("rejected_domain")
         return ()
     observed_at = now or datetime.now(timezone.utc)
     parser = _Scripts()
@@ -83,18 +89,23 @@ def parse_jobpostings(html: str, page_url: str, company_name: str, official_doma
             types = job.get("@type")
             if "JobPosting" not in (types if isinstance(types, list) else [types]):
                 continue
+            mark("jobposting_found")
             title, description = job.get("title"), job.get("description")
             posted = _date(job.get("datePosted"))
             expiry = _date(job.get("validThrough"))
             if not isinstance(title, str) or not title.strip() or not isinstance(description, str) or not description.strip():
+                mark("rejected_missing_details")
                 continue
             if posted is None or posted > observed_at + timedelta(days=1) or posted < observed_at - timedelta(days=180):
+                mark("rejected_date")
                 continue
             if expiry is not None and expiry < observed_at:
+                mark("rejected_expired")
                 continue
             hiring = job.get("hiringOrganization")
             if isinstance(hiring, Mapping) and isinstance(hiring.get("name"), str):
                 if normalize_company_key(hiring["name"]) != normalize_company_key(company_name):
+                    mark("rejected_employer")
                     continue
             locations = job.get("jobLocation")
             locations = locations if isinstance(locations, list) else [locations]
@@ -110,9 +121,11 @@ def parse_jobpostings(html: str, page_url: str, company_name: str, official_doma
                 if is_val_de_marne(label):
                     labels.append(label)
             if not labels:
+                mark("rejected_geography_94")
                 continue
             declared_url = job.get("url")
             if isinstance(declared_url, str) and declared_url.strip() and urlsplit(declared_url).hostname != official_domain:
+                mark("rejected_offer_url")
                 continue
             url = declared_url if isinstance(declared_url, str) and declared_url.strip() else page_url
             identifier = job.get("identifier")
@@ -131,4 +144,5 @@ def parse_jobpostings(html: str, page_url: str, company_name: str, official_doma
                 contract_type=job.get("employmentType") if isinstance(job.get("employmentType"), str) else None,
                 source_url=url, discovery_provider="official_web", origin=f"official_web:{official_domain}",
             ))
+            mark("offers_confirmed_94")
     return tuple(offers)

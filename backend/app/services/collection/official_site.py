@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from typing import Iterable
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin, urlunsplit, unquote
+from html.parser import HTMLParser
+import re
 
 from app.services.collection.greenhouse import EMPLOYER_CAREER_SOURCE
 from app.services.collection.jobposting import parse_jobpostings
@@ -12,7 +14,8 @@ from app.services.contactability.providers.official_web.fetcher import SecureWeb
 from app.services.contactability.providers.official_web.robots import RobotsTxtPolicy
 
 
-_CAREER_TERMS = ("career", "jobs", "recrut", "rejoind", "nous-rejoindre", "emploi", "offre")
+_CAREER_LABEL = re.compile(r"\b(carri[eè]res?|recrutements?|rejoindre|jobs?|offres? d.emploi)\b", re.I)
+_CAREER_PATH = re.compile(r"(?:^|[/_-])(?:careers?|carriere|carrieres|recrutement|rejoindre|jobs?|offres?|offres?-d-emploi)(?:$|[/_.-])", re.I)
 _ATS_HOSTS = {
     "boards.greenhouse.io": "greenhouse", "job-boards.greenhouse.io": "greenhouse",
     "jobs.lever.co": "lever", "jobs.ashbyhq.com": "ashby",
@@ -51,14 +54,17 @@ class OfficialSiteJobProvider:
         self.known_pages = known_pages
         self.career_pages: tuple[str, ...] = ()
         self.ats_candidates: tuple[tuple[str, str], ...] = ()
+        self.jobposting_stats: dict[str, int] = {}
 
     def iter_pages(self) -> Iterable[ProviderPage]:
         home = self.fetcher.fetch(self.site_url, initial=False)
         if urlsplit(home.final_url).hostname != self.domain:
             raise ValueError("employer site redirected to another domain")
-        links = tuple(home.links)
-        candidates = [url for url in links if _career_link(url) and _same_domain(url, self.domain)]
-        known = [url for url in self.known_pages if _same_domain(url, self.domain)]
+        semantic = _semantic_links(home.html, home.final_url)
+        links = tuple(home.links) + semantic
+        candidates = [_page_url(url) for url in links if (_career_link(url) or url in semantic)
+                      and _same_domain(url, self.domain) and _page_url(url) != _page_url(home.final_url)]
+        known = [_page_url(url) for url in self.known_pages if _same_domain(url, self.domain) and _career_link(url)]
         pages = [home.final_url, *dict.fromkeys(known + candidates)][:5]
         # A public sitemap is consulted only if homepage links expose no careers path.
         if len(pages) == 1:
@@ -78,12 +84,15 @@ class OfficialSiteJobProvider:
             except Exception:
                 continue
             if not _same_domain(page.final_url, self.domain):
+                all_links.append(page.final_url)  # bounded employer redirect to a public ATS
                 continue
             fetched.add(url)
             all_links.extend(page.links)
-            offers.extend(parse_jobpostings(page.html, page.final_url, self.company_name, self.domain))
+            all_links.extend(_semantic_links(page.html, page.final_url))
+            offers.extend(parse_jobpostings(page.html, page.final_url, self.company_name, self.domain,
+                                            diagnostics=self.jobposting_stats))
         # Follow only a few job links found on confirmed career pages.
-        job_links = [url for url in all_links if _same_domain(url, self.domain) and _career_link(url) and url not in fetched]
+        job_links = [_page_url(url) for url in all_links if _same_domain(url, self.domain) and _career_link(url) and _page_url(url) not in fetched]
         for url in dict.fromkeys(job_links):
             if len(fetched) >= 12:
                 break
@@ -94,8 +103,9 @@ class OfficialSiteJobProvider:
             if not _same_domain(page.final_url, self.domain):
                 continue
             fetched.add(url)
-            offers.extend(parse_jobpostings(page.html, page.final_url, self.company_name, self.domain))
-        self.career_pages = tuple(sorted(fetched))
+            offers.extend(parse_jobpostings(page.html, page.final_url, self.company_name, self.domain,
+                                            diagnostics=self.jobposting_stats))
+        self.career_pages = tuple(sorted(url for url in fetched if _career_link(url) or url in candidates or url in known))
         self.ats_candidates = tuple(sorted(set(candidate for url in all_links if (candidate := ats_link(url)))))
         deduped = {offer.source_offer_id: offer for offer in offers}
         yield ProviderPage(page_number=1, offers=tuple(deduped.values()), is_last=True)
@@ -107,8 +117,13 @@ def _same_domain(url: str, domain: str) -> bool:
 
 
 def _career_link(url: str) -> bool:
-    path = urlsplit(url).path.casefold()
-    return any(term in path for term in _CAREER_TERMS)
+    path = unquote(urlsplit(url).path).casefold()
+    return bool(_CAREER_PATH.search(path))
+
+
+def _page_url(url: str) -> str:
+    parsed = urlsplit(url)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
 
 
 def _sitemap_links(text: str, domain: str) -> tuple[str, ...]:
@@ -116,3 +131,37 @@ def _sitemap_links(text: str, domain: str) -> tuple[str, ...]:
     from html import unescape
     return tuple(url for value in re.findall(r"<loc>\s*([^<]+)\s*</loc>", text, re.I)
                  if _same_domain((url := unescape(value.strip())), domain) and _career_link(url))[:20]
+
+
+class _CareerLinkParser(HTMLParser):
+    def __init__(self, base: str):
+        super().__init__(convert_charrefs=True)
+        self.base = base
+        self.links: list[str] = []
+        self.anchor: str | None = None
+        self.label: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        data = dict(attrs)
+        if tag == "iframe" and isinstance(data.get("src"), str):
+            self.links.append(urljoin(self.base, data["src"]))
+        if tag == "a" and isinstance(data.get("href"), str):
+            self.anchor = urljoin(self.base, data["href"])
+            self.label = []
+
+    def handle_data(self, value):
+        if self.anchor:
+            self.label.append(value)
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self.anchor:
+            if _CAREER_LABEL.search(" ".join(self.label)):
+                self.links.append(self.anchor)
+            self.anchor = None
+            self.label = []
+
+
+def _semantic_links(html: str, base: str) -> tuple[str, ...]:
+    parser = _CareerLinkParser(base)
+    parser.feed(html or "")
+    return tuple(url for url in dict.fromkeys(parser.links) if urlsplit(url).scheme == "https")[:40]

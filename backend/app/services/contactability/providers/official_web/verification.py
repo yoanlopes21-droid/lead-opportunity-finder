@@ -171,6 +171,11 @@ def _verify_one(
 
 def _build_signals(target, candidate, pages, observed_at):
     signals: list[WebsiteVerificationSignal] = []
+    if candidate.search_provider == "inpi_rne":
+        signals.append(_signal(
+            "rne_declaration", 45, "Domaine déclaré pour ce SIREN au RNE ; site accessible et identité encore à vérifier.",
+            candidate.url, candidate.registrable_domain, target.siren, candidate.observed_at,
+        ))
     combined = " ".join(page.text for page in pages)
     normalized_text = normalize_generic(combined) or ""
     sirens = _extract_sirens(combined)
@@ -336,7 +341,7 @@ def _positive_families(signals):
             continue
         if signal.signal_type in {"legal_name_exact", "distinctive_name", "homepage_brand_identity"}:
             families.add("identity")
-        elif signal.signal_type in {"domain_brand_match", "legal_operator_target"}:
+        elif signal.signal_type in {"domain_brand_match", "legal_operator_target", "rne_declaration"}:
             families.add("ownership")
         elif signal.signal_type == "internal_legal_page":
             families.add("legal")

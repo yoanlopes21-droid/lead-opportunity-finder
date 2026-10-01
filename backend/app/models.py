@@ -86,6 +86,7 @@ class CollectionRun(Base):
     brave_hard_cap: Mapped[Optional[int]] = mapped_column(Integer)
     stop_requested: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     completion_reason: Mapped[Optional[str]] = mapped_column(String(80))
+    funnel_stats: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class ObservedJobOffer(Base):
@@ -205,6 +206,8 @@ class CompanyDiscoverySeed(Base):
     last_inspected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     next_inspection_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_result: Mapped[Optional[str]] = mapped_column(String(1000))
+    domain_evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    offer_diagnostics: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class CompanySeedCursor(Base):

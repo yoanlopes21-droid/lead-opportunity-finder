@@ -341,11 +341,19 @@ def ensure_collection_run_schema(engine: Engine) -> None:
         "brave_hard_cap": "INTEGER",
         "stop_requested": "BOOLEAN NOT NULL DEFAULT 0",
         "completion_reason": "VARCHAR(80)",
+        "funnel_stats": "JSON NOT NULL DEFAULT '{}'",
     }
     with engine.begin() as connection:
         for name, definition in additions.items():
             if name not in existing:
                 connection.execute(text(f"ALTER TABLE collection_runs ADD COLUMN {name} {definition}"))
+    if "company_discovery_seeds" in inspect(engine).get_table_names():
+        seed_columns = {column["name"] for column in inspect(engine).get_columns("company_discovery_seeds")}
+        with engine.begin() as connection:
+            if "domain_evidence" not in seed_columns:
+                connection.execute(text("ALTER TABLE company_discovery_seeds ADD COLUMN domain_evidence JSON NOT NULL DEFAULT '{}'"))
+            if "offer_diagnostics" not in seed_columns:
+                connection.execute(text("ALTER TABLE company_discovery_seeds ADD COLUMN offer_diagnostics JSON NOT NULL DEFAULT '{}'"))
     if "observed_job_offers" in inspect(engine).get_table_names():
         offer_columns = {
             column["name"] for column in inspect(engine).get_columns("observed_job_offers")

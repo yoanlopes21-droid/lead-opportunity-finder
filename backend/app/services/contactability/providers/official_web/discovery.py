@@ -54,6 +54,11 @@ _EXCLUDED_DOMAINS = {
     "labonnealternance.apprentissage.beta.gouv.fr": "jobboard",
     "pple.fr": "directory",
     "jeveuxaider.gouv.fr": "volunteer_platform",
+    "boards.greenhouse.io": "jobboard",
+    "job-boards.greenhouse.io": "jobboard",
+    "jobs.lever.co": "jobboard",
+    "jobs.ashbyhq.com": "jobboard",
+    "apply.workable.com": "jobboard",
 }
 _THIRD_PARTY_DOMAIN_MARKERS = {
     "annuaire": "directory", "rubypayeur": "financial_directory", "pappers": "legal_data",
