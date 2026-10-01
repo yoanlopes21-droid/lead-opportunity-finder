@@ -11,7 +11,7 @@ from app.models import CommercialExclusion, CommercialRelationship, ObservedJobO
 from app.services.commercial_leads.exclusions import ExclusionType
 
 
-NOW = datetime(2026, 9, 22, 10, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc).replace(microsecond=0)
 
 
 @pytest.fixture
@@ -78,7 +78,7 @@ def test_update_status_with_optional_follow_up_date(client, session):
     updated = client.patch(f"/api/v1/commercial-relationships/{relationship_id}", json={
         "status": "follow_up", "next_action_at": due, "note": "Rappeler mardi",
     })
-    assert updated.status_code == 200 and updated.json()["next_action_at"].startswith("2026-09-29T10:00:00")
+    assert updated.status_code == 200 and updated.json()["next_action_at"].startswith(due[:19])
     assert client.get("/api/v1/commercial-relationships?view=follow_up").json()["total"] == 1
 
 

@@ -21,12 +21,14 @@ from app.api.job_offer_refresh_runs import router as job_offer_refresh_runs_rout
 from app.api.source_boards import router as source_boards_router
 from app.api.open_web_runs import router as open_web_runs_router
 from app.api.recruitment_signals import router as recruitment_signals_router
+from app.api.non_ft_runs import router as non_ft_runs_router
 from app.services.search_runs import ensure_search_run_schema, recover_orphaned_search_runs
 from app.services.commercial_interactions import ensure_commercial_interaction_schema
 from app.services.persistence.offers import ensure_collection_run_schema
 from app.services.job_offer_refresh_runs import recover_orphaned_refresh_runs
 from app.services.job_source_boards import recover_orphaned_board_runs
 from app.services.open_web_runs import recover_orphaned_open_web_runs
+from app.services.non_ft_runs import recover_orphaned_non_ft_runs
 from app.services.collection.open_web import reconcile_recruitment_signal_quality
 from app.schemas import AppSummary, FranceTravailAuthCheckResponse, HealthResponse
 from app.services.france_travail.auth import FranceTravailAuthError, FranceTravailOAuthClient
@@ -50,6 +52,7 @@ async def lifespan(_: FastAPI):
         recover_orphaned_refresh_runs(session)
         recover_orphaned_board_runs(session)
         recover_orphaned_open_web_runs(session)
+        recover_orphaned_non_ft_runs(session)
     yield
 
 
@@ -72,6 +75,7 @@ app.include_router(job_offer_refresh_runs_router)
 app.include_router(source_boards_router)
 app.include_router(open_web_runs_router)
 app.include_router(recruitment_signals_router)
+app.include_router(non_ft_runs_router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse, tags=["system"])

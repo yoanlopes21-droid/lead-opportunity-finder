@@ -44,6 +44,7 @@ OFFER_HEADERS = (
     "Salaire", "Date de publication", "Première détection locale", "Dernière observation",
     "Âge (jours)", "Nombre d’observations", "Nombre de sources", "Sources",
     "URLs de preuve", "Nouvelle récemment", "Identifiants source",
+    "Provenance principale", "Hors France Travail", "Premier canal de découverte",
 )
 
 CONTACT_HEADERS = (
@@ -224,6 +225,9 @@ def _offer_rows(items: Sequence[CommercialExcelItem]) -> Iterable[tuple[object, 
                 _join_urls(offer.source_urls),
                 is_new,
                 _join_unique(offer.source_offer_ids),
+                offer.primary_provenance,
+                "Oui" if offer.non_ft_only else "Non",
+                offer.first_discovery_channel,
             )
 
 

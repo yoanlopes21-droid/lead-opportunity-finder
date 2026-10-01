@@ -8,7 +8,7 @@ export type PersonContact = { id: number; display_name: string; relevance: strin
 export type ContactStrategy = { target_type: string; preferred_channel: string; preferred_contact_point_id: number | null; preferred_person_contact_id: number | null; fallback_channels: string[]; confidence: string; rationale_codes: string[]; short_context: string; warnings: string[]; missing_information: string[]; evidence: Provenance[]; scope: string; local_key: string | null; channel_relevance: string }
 export type LocalOpportunity = { local_key: string; commune: string | null; location_label: string | null; department: string; active_offer_count: number; role_diversity: number; representative_roles: string[]; newest_offer_date: string | null; oldest_offer_date: string | null; source_offer_ids: string[]; source_urls: string[]; signals: OpportunitySignal[]; contact_point_ids: number[]; person_contact_ids: number[] }
 export type JobOfferEvidence = { source: string; source_offer_id: string; source_url: string | null; discovery_provider: string | null }
-export type ActiveJobOffer = { offer_id: string; title: string; commune: string | null; location_label: string | null; display_location: string | null; published_at: string | null; updated_at: string | null; contract_type: string | null; salary: string | null; source: string; source_url: string | null; sources: string[]; source_urls: string[]; source_offer_ids: string[]; evidence: JobOfferEvidence[]; local_key: string; age_days: number | null }
+export type ActiveJobOffer = { offer_id: string; title: string; commune: string | null; location_label: string | null; display_location: string | null; published_at: string | null; updated_at: string | null; contract_type: string | null; salary: string | null; source: string; source_url: string | null; sources: string[]; source_urls: string[]; source_offer_ids: string[]; evidence: JobOfferEvidence[]; local_key: string; age_days: number | null; non_ft_only: boolean; primary_provenance: string; first_discovery_channel: string }
 export type OfficialWeb = { verified_site_status: string | null; verified_domain: string | null; verification_score: number; provider: string | null; warnings: string[] }
 export type ContactabilitySummary = { scope: string; official_web: OfficialWeb; warnings: string[] }
 export type ExclusionType = 'current_client' | 'recent_prospect' | 'manual_exclusion'
@@ -30,6 +30,7 @@ export type CommercialLead = {
 
 export type CommercialLeadPage = { items: CommercialLead[]; total: number; limit: number; offset: number }
 export type RecentLeadKind = 'all' | 'new_companies' | 'new_offers'
+export type RecentSourceFilter = 'all' | 'non_ft_only' | 'france_travail' | 'employer_direct' | 'ats'
 export type RecentCommercialLead = CommercialLead & {
   latest_new_opportunity_at: string
   new_offer_count_in_window: number
@@ -38,7 +39,7 @@ export type RecentCommercialLead = CommercialLead & {
 }
 export type RecentCommercialLeadPage = {
   items: RecentCommercialLead[]; total: number; limit: number; offset: number
-  window_hours: number; kind: RecentLeadKind
+  window_hours: number; kind: RecentLeadKind; non_ft_count: number
 }
 export type BraveUsage = { monthly_budget: number; monthly_used: number; monthly_remaining: number; estimated_cost_used_usd: number; estimated_credit_remaining_usd: number; current_period_end: string; days_remaining_in_period: number; status: string }
 
@@ -75,7 +76,7 @@ export type JobOfferRefreshRun = {
 }
 
 export type JobSourceBoard = {
-  id: number; provider_id: 'greenhouse' | 'lever'; display_name: string; board_identifier: string
+  id: number; provider_id: 'greenhouse' | 'lever' | 'ashby' | 'workable'; display_name: string; board_identifier: string
   company_name_hint: string; enabled: boolean; created_at: string; updated_at: string
   last_refresh_at: string | null; last_refresh_status: JobOfferRefreshRunStatus | null
   last_error: string | null; last_run_id: number | null; active_offer_count: number
@@ -83,7 +84,7 @@ export type JobSourceBoard = {
   last_duration_seconds: number | null
 }
 export type JobSourceBoardCreate = {
-  provider_id: 'greenhouse' | 'lever'; display_name: string; board_identifier: string
+  provider_id: 'greenhouse' | 'lever' | 'ashby' | 'workable'; display_name: string; board_identifier: string
   company_name_hint: string; enabled: boolean
 }
 export type SourceRefreshRun = {

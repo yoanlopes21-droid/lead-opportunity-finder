@@ -108,3 +108,4 @@ class FetchedPage:
     text: str
     links: tuple[str, ...]
     fetched_at: datetime
+    html: str = ""

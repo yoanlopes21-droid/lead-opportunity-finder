@@ -42,6 +42,7 @@ class OfferSnapshot:
     department_code: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    valid_through: Optional[str] = None
     contract_type: Optional[str] = None
     salary: Optional[str] = None
     source_url: Optional[str] = None
@@ -88,6 +89,7 @@ _SIGNIFICANT_FIELDS = (
     "department_code",
     "created_at",
     "updated_at",
+    "valid_through",
     "contract_type",
     "salary",
     "source_url",
@@ -356,6 +358,10 @@ def ensure_collection_run_schema(engine: Engine) -> None:
             if "recruitment_signal_id" not in offer_columns:
                 connection.execute(text(
                     "ALTER TABLE observed_job_offers ADD COLUMN recruitment_signal_id INTEGER"
+                ))
+            if "valid_through" not in offer_columns:
+                connection.execute(text(
+                    "ALTER TABLE observed_job_offers ADD COLUMN valid_through VARCHAR(64)"
                 ))
             connection.execute(text(
                 "CREATE INDEX IF NOT EXISTS ix_observed_job_offers_discovery_provider "

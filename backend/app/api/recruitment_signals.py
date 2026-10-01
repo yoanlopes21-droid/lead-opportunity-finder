@@ -25,8 +25,8 @@ from app.services.recruitment_signals import (
 router = APIRouter(prefix="/api/v1/recruitment-signals", tags=["recruitment signals"])
 
 
-def _response(signal: RecruitmentSignal) -> RecruitmentSignalResponse:
-    assessment = assess_signal_promotion(signal)
+def _response(signal: RecruitmentSignal, session: Session | None = None) -> RecruitmentSignalResponse:
+    assessment = assess_signal_promotion(signal, session)
     return RecruitmentSignalResponse(
         id=signal.id, discovery_provider=signal.discovery_provider, source=signal.source,
         source_url=signal.source_url, domain=signal.domain, page_type=assessment.page_type,
@@ -67,7 +67,7 @@ def list_signals(
         select(RecruitmentSignal.status, func.count()).group_by(RecruitmentSignal.status)
     ).all())
     return RecruitmentSignalListResponse(
-        items=[_response(item) for item in items],
+        items=[_response(item, session) for item in items],
         total=int(session.scalar(count_statement) or 0),
         new_count=int(counts.get("new", 0)),
         review_needed_count=int(counts.get("review_needed", 0)),
@@ -85,7 +85,7 @@ def promote(signal_id: int, session: Session = Depends(get_db)) -> SignalActionR
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     session.refresh(signal)
     return SignalActionResponse(
-        signal=_response(signal), message=f"Signal promu vers l’offre nº {offer.id}.",
+        signal=_response(signal, session), message=f"Signal promu vers l’offre nº {offer.id}.",
     )
 
 
@@ -98,4 +98,4 @@ def dismiss(signal_id: int, session: Session = Depends(get_db)) -> SignalActionR
         signal = dismiss_signal(session, signal)
     except SignalPromotionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return SignalActionResponse(signal=_response(signal), message="Signal ignoré.")
+    return SignalActionResponse(signal=_response(signal, session), message="Signal ignoré.")

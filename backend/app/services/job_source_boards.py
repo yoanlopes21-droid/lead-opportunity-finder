@@ -18,11 +18,13 @@ from app.services.collection.greenhouse import (
     GreenhouseJobBoardProvider,
 )
 from app.services.collection.lever import LeverBoard, LeverJobBoardProvider
+from app.services.collection.ashby import AshbyBoard, AshbyJobBoardProvider
+from app.services.collection.workable import WorkableBoard, WorkableJobBoardProvider
 from app.services.collection.providers import JobOfferProviderCollector
 from app.services.persistence.offers import CollectionRunStatus, create_collection_run
 
 
-SUPPORTED_BOARD_PROVIDERS = ("greenhouse", "lever")
+SUPPORTED_BOARD_PROVIDERS = ("greenhouse", "lever", "ashby", "workable")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
 
@@ -51,12 +53,22 @@ def normalize_board_identifier(provider_id: str, value: str) -> str:
                 raise BoardValidationError("Cette URL n’est pas une URL publique Greenhouse reconnue.")
             if host == "boards-api.greenhouse.io" and parts[:1] == ["v1"]:
                 parts = parts[2:] if len(parts) > 1 and parts[1] == "boards" else []
-        else:
+        elif provider == "lever":
             allowed = {"jobs.lever.co", "api.lever.co"}
             if host not in allowed:
                 raise BoardValidationError("Cette URL n’est pas une URL publique Lever reconnue.")
             if host == "api.lever.co" and parts[:2] == ["v0", "postings"]:
                 parts = parts[2:]
+        elif provider == "ashby":
+            if host not in {"jobs.ashbyhq.com", "api.ashbyhq.com"}:
+                raise BoardValidationError("Cette URL n’est pas une URL publique Ashby reconnue.")
+            if host == "api.ashbyhq.com":
+                parts = parts[2:] if parts[:2] == ["posting-api", "job-board"] else []
+        else:
+            if host not in {"apply.workable.com", "www.workable.com"}:
+                raise BoardValidationError("Cette URL n’est pas une URL publique Workable reconnue.")
+            if host == "www.workable.com":
+                parts = parts[2:] if parts[:2] == ["api", "accounts"] else []
         if not parts:
             raise BoardValidationError("L’URL ne contient pas d’identifiant de board.")
         raw = parts[0]
@@ -200,6 +212,10 @@ def build_board_provider(board: JobSourceBoard):
         return LeverJobBoardProvider(LeverBoard(
             board.board_identifier, board.company_name_hint, discovery_provider="lever"
         ))
+    if board.provider_id == "ashby":
+        return AshbyJobBoardProvider(AshbyBoard(board.board_identifier, board.company_name_hint))
+    if board.provider_id == "workable":
+        return WorkableJobBoardProvider(WorkableBoard(board.board_identifier, board.company_name_hint))
     raise BoardValidationError("Provider ATS non pris en charge.")
 
 

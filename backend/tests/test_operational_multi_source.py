@@ -466,14 +466,13 @@ def test_signal_persistence_promotion_invalid_geography_dismiss_and_cross_source
     session.add(existing)
     session.commit()
     valid = _signal(session, published_at="2026-09-23T08:00:00Z")
-    assert assess_signal_promotion(valid).is_promotable is True
-    offer = promote_signal(session, valid)
-    assert offer.discovery_provider == BRAVE_DISCOVERY_PROVIDER
-    assert offer.recruitment_signal_id == valid.id
-    assert valid.status == "promoted"
+    assert assess_signal_promotion(valid).is_promotable is False
+    with pytest.raises(SignalPromotionError, match="Page tierce"):
+        promote_signal(session, valid)
+    assert valid.status == "review_needed"
     opportunity = aggregate_active_company_opportunities(session, now=NOW).opportunities[0]
     assert opportunity.active_offer_count == 1
-    assert set(opportunity.active_job_offers[0].sources) == {"france_travail", "linkedin"}
+    assert set(opportunity.active_job_offers[0].sources) == {"france_travail"}
 
     invalid = _signal(
         session, source_url="https://fr.indeed.com/viewjob?jk=bad",

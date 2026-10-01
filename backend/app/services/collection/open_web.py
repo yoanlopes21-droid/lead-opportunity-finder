@@ -212,6 +212,9 @@ def source_from_url(url: str) -> str:
         "jooble.org": "jooble", "meteojob.com": "meteojob", "glassdoor.fr": "glassdoor",
         "francetravail.fr": "france_travail", "directemploi.com": "directemploi",
         "cadremploi.fr": "cadremploi", "la-mairie.com": "other_job_board",
+        "jobijoba.com": "other_job_board", "wizbii.com": "other_job_board",
+        "mappy.com": "directory", "annuaire-mairie.fr": "directory",
+        "keskeces.fr": "directory", "linternaute.com": "directory",
     }
     for domain, source in known_jobboards.items():
         if host == domain or host.endswith(f".{domain}"):

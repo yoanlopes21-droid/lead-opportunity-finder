@@ -142,6 +142,7 @@ class RecentCommercialLeadQuery:
     department_code: str = "94"
     window_hours: int = 48
     kind: Literal["all", "new_companies", "new_offers"] = "all"
+    source_filter: Literal["all", "non_ft_only", "france_travail", "employer_direct", "ats"] = "all"
     offset: int = 0
     limit: Optional[int] = None
 
@@ -150,6 +151,8 @@ class RecentCommercialLeadQuery:
             raise ValueError("window_hours must be one of 24, 48, 168, or 720")
         if self.kind not in {"all", "new_companies", "new_offers"}:
             raise ValueError("kind must be all, new_companies, or new_offers")
+        if self.source_filter not in {"all", "non_ft_only", "france_travail", "employer_direct", "ats"}:
+            raise ValueError("invalid source filter")
         if self.offset < 0:
             raise ValueError("offset must not be negative")
         if self.limit is not None and self.limit < 1:
@@ -164,6 +167,7 @@ class RecentCommercialLeadPage:
     limit: Optional[int]
     window_hours: int
     kind: str
+    non_ft_count: int = 0
 
 
 def list_commercial_leads(
@@ -231,6 +235,7 @@ def list_recent_commercial_leads(
     leads = _compose_commercial_leads(session, query.department_code, observed_at, provider)
     company_first_seen = _company_first_seen_by_key(session)
     recent: list[RecentCommercialLead] = []
+    non_ft_count = 0
     eligibility_query = CommercialLeadQuery(department_code=query.department_code)
     for lead in leads:
         if not _matches_query(lead, eligibility_query):
@@ -239,6 +244,17 @@ def list_recent_commercial_leads(
             offer for offer in lead.active_job_offers if _as_utc(offer.first_seen_at) >= cutoff
         )
         if not new_offers:
+            continue
+        if any(offer.non_ft_only for offer in new_offers):
+            non_ft_count += 1
+        def matches_source(offer) -> bool:
+            if query.source_filter == "non_ft_only":
+                return offer.non_ft_only
+            if query.source_filter == "france_travail":
+                return "france_travail" in offer.sources
+            return offer.primary_provenance == query.source_filter
+
+        if query.source_filter != "all" and not any(matches_source(offer) for offer in new_offers):
             continue
         first_seen = company_first_seen.get(lead.company_key)
         is_new_company = first_seen is not None and first_seen >= cutoff
@@ -268,6 +284,7 @@ def list_recent_commercial_leads(
     return RecentCommercialLeadPage(
         items=tuple(page), total_count=total_count, offset=query.offset, limit=query.limit,
         window_hours=query.window_hours, kind=query.kind,
+        non_ft_count=non_ft_count,
     )
 
 

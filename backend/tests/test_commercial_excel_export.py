@@ -215,6 +215,7 @@ def test_endpoint_returns_safe_openable_structured_xlsx(client, session):
         "Salaire", "Date de publication", "Première détection locale", "Dernière observation",
         "Âge (jours)", "Nombre d’observations", "Nombre de sources", "Sources",
         "URLs de preuve", "Nouvelle récemment", "Identifiants source",
+        "Provenance principale", "Hors France Travail", "Premier canal de découverte",
     ]
     assert [cell.value for cell in workbook["Contacts"][1]] == [
         "Entreprise", "SIREN", "Nom / personne", "Fonction", "Pertinence", "Email",

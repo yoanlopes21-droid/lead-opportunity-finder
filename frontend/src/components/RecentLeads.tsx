@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { downloadRecentCommercialLeadsExcel, fetchRecentCommercialLeads } from '../api'
-import type { RecentCommercialLeadPage, RecentLeadKind } from '../types'
+import type { RecentCommercialLeadPage, RecentLeadKind, RecentSourceFilter } from '../types'
 import { LeadCard } from './LeadCard'
 
 const windows = [
@@ -14,11 +14,19 @@ const kinds: Array<{ value: RecentLeadKind; label: string }> = [
   { value: 'new_companies', label: 'Nouvelles entreprises' },
   { value: 'new_offers', label: 'Nouvelles offres' },
 ]
+const sourceFilters: Array<{ value: RecentSourceFilter; label: string }> = [
+  { value: 'all', label: 'Toutes les sources' },
+  { value: 'non_ft_only', label: 'Hors France Travail' },
+  { value: 'france_travail', label: 'France Travail' },
+  { value: 'employer_direct', label: 'Employeur direct' },
+  { value: 'ats', label: 'ATS' },
+]
 
 export function RecentLeads() {
   const [page, setPage] = useState<RecentCommercialLeadPage | null>(null)
   const [windowHours, setWindowHours] = useState(48)
   const [kind, setKind] = useState<RecentLeadKind>('all')
+  const [sourceFilter, setSourceFilter] = useState<RecentSourceFilter>('all')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -27,16 +35,16 @@ export function RecentLeads() {
 
   const loadPage = useCallback(async (offset: number) => {
     setIsLoading(true); setError(null)
-    try { setPage(await fetchRecentCommercialLeads(offset, windowHours, kind)) }
+    try { setPage(await fetchRecentCommercialLeads(offset, windowHours, kind, sourceFilter)) }
     catch (requestError) { setError(requestError instanceof Error ? requestError.message : 'Impossible de joindre l’API locale.') }
     finally { setIsLoading(false) }
-  }, [kind, windowHours])
+  }, [kind, windowHours, sourceFilter])
 
   useEffect(() => { void loadPage(0) }, [loadPage])
 
   async function exportExcel() {
     setExporting(true); setExportError(null)
-    try { await downloadRecentCommercialLeadsExcel(windowHours, kind) }
+    try { await downloadRecentCommercialLeadsExcel(windowHours, kind, sourceFilter) }
     catch (requestError) { setExportError(requestError instanceof Error ? requestError.message : 'Impossible de télécharger l’export Excel.') }
     finally { setExporting(false) }
   }
@@ -49,11 +57,12 @@ export function RecentLeads() {
 
   return <section className="recent-page" aria-labelledby="recent-title">
     {notice && <p className="success-notice" role="status">{notice}</p>}
-    <div className="section-heading"><div><p className="eyebrow">PREMIÈRE DÉTECTION LOCALE</p><h2 id="recent-title">Nouveautés</h2><p className="section-intro">Entreprises et besoins apparus récemment dans la base, toujours classés par score commercial.</p></div><div className="source-actions"><button type="button" className="secondary-button" onClick={() => void exportExcel()} disabled={exporting}>{exporting ? 'Préparation…' : 'Exporter Excel'}</button><button type="button" className="refresh-button" onClick={() => void loadPage(page?.offset ?? 0)} disabled={isLoading}>{isLoading && page ? 'Actualisation…' : 'Recharger la liste'}</button></div></div>
+    <div className="section-heading"><div><p className="eyebrow">PREMIÈRE DÉTECTION LOCALE</p><h2 id="recent-title">Nouveautés</h2><p className="section-intro">Entreprises et besoins apparus récemment dans la base, toujours classés par score commercial. {page && <strong>{page.non_ft_count} entreprise{page.non_ft_count > 1 ? 's' : ''} avec une nouvelle opportunité hors FT.</strong>}</p></div><div className="source-actions"><button type="button" className="secondary-button" onClick={() => void exportExcel()} disabled={exporting}>{exporting ? 'Préparation…' : 'Exporter Excel'}</button><button type="button" className="refresh-button" onClick={() => void loadPage(page?.offset ?? 0)} disabled={isLoading}>{isLoading && page ? 'Actualisation…' : 'Recharger la liste'}</button></div></div>
     {exportError && <p className="inline-error" role="alert">{exportError}</p>}
     <div className="recent-filters" aria-label="Filtres de nouveauté">
       <div><span>Fenêtre</span>{windows.map((item) => <button type="button" key={item.hours} className={windowHours === item.hours ? 'active' : ''} onClick={() => setWindowHours(item.hours)}>{item.label}</button>)}</div>
       <div><span>Type</span>{kinds.map((item) => <button type="button" key={item.value} className={kind === item.value ? 'active' : ''} onClick={() => setKind(item.value)}>{item.label}</button>)}</div>
+      <div><span>Source</span>{sourceFilters.map((item) => <button type="button" key={item.value} className={sourceFilter === item.value ? 'active' : ''} onClick={() => setSourceFilter(item.value)}>{item.label}</button>)}</div>
     </div>
     {isLoading && !page && <div className="state-card" role="status">Chargement des nouveautés…</div>}
     {error && <div className="state-card error-state" role="alert"><p>{error}</p><button type="button" onClick={() => void loadPage(page?.offset ?? 0)}>Réessayer</button></div>}

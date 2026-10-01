@@ -131,6 +131,7 @@ def export_recent_commercial_leads(
     department: Annotated[str, Query(min_length=1)] = "94",
     window_hours: Annotated[int, Query()] = 48,
     kind: Literal["all", "new_companies", "new_offers"] = "all",
+    source_filter: Literal["all", "non_ft_only", "france_travail", "employer_direct", "ats"] = "all",
     session: Session = Depends(get_db),
 ) -> StreamingResponse:
     """Export the complete recent view with the same window and kind rules."""
@@ -141,6 +142,7 @@ def export_recent_commercial_leads(
         department_code=department,
         window_hours=window_hours,
         kind=kind,
+        source_filter=source_filter,
         limit=None,
     ), now=generated_at)
     content = build_commercial_xlsx(tuple(
@@ -163,6 +165,7 @@ def get_recent_commercial_leads(
     department: Annotated[str, Query(min_length=1)] = "94",
     window_hours: Annotated[int, Query()] = 48,
     kind: Literal["all", "new_companies", "new_offers"] = "all",
+    source_filter: Literal["all", "non_ft_only", "france_travail", "employer_direct", "ats"] = "all",
     limit: Annotated[int, Query(gt=0, le=MAX_LIMIT)] = DEFAULT_LIMIT,
     offset: Annotated[int, Query(ge=0)] = 0,
     session: Session = Depends(get_db),
@@ -174,6 +177,7 @@ def get_recent_commercial_leads(
         department_code=department,
         window_hours=window_hours,
         kind=kind,
+        source_filter=source_filter,
         offset=offset,
         limit=limit,
     ))

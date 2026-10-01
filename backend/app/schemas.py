@@ -265,6 +265,9 @@ class ActiveJobOfferResponse(BaseModel):
     contract_type: Optional[str]
     salary: Optional[str]
     source: str
+    non_ft_only: bool = False
+    primary_provenance: str = ""
+    first_discovery_channel: str = ""
     source_url: Optional[str]
     sources: list[str]
     source_urls: list[str]
@@ -883,6 +886,7 @@ class RecentCommercialLeadListResponse(BaseModel):
     offset: int
     window_hours: int
     kind: str
+    non_ft_count: int = 0
 
     @classmethod
     def from_page(cls, page) -> "RecentCommercialLeadListResponse":
@@ -893,4 +897,5 @@ class RecentCommercialLeadListResponse(BaseModel):
             offset=page.offset,
             window_hours=page.window_hours,
             kind=page.kind,
+            non_ft_count=page.non_ft_count,
         )

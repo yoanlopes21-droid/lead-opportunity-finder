@@ -39,6 +39,21 @@ _EXCLUDED_DOMAINS = {
     "verif.com": "directory",
     "pagesjaunes.fr": "directory",
     "annuaire-entreprises.data.gouv.fr": "directory",
+    "jobijoba.com": "jobboard",
+    "wizbii.com": "jobboard",
+    "mappy.com": "directory",
+    "annuaire-mairie.fr": "directory",
+    "keskeces.fr": "directory",
+    "linternaute.com": "directory",
+    "emploi-collectivites.fr": "jobboard",
+    "villedereve.fr": "directory",
+    "unjobenville.com": "jobboard",
+    "kompass.com": "directory",
+    "cylex-locale.fr": "directory",
+    "kwalead.com": "jobboard",
+    "labonnealternance.apprentissage.beta.gouv.fr": "jobboard",
+    "pple.fr": "directory",
+    "jeveuxaider.gouv.fr": "volunteer_platform",
 }
 _THIRD_PARTY_DOMAIN_MARKERS = {
     "annuaire": "directory", "rubypayeur": "financial_directory", "pappers": "legal_data",
@@ -199,7 +214,7 @@ def _candidate_from_seed(
         domain = "invalid"
         classification, reasons = WebsiteCandidateClassification.EXCLUDED, ("invalid_url",)
     else:
-        classification, reasons = classify_domain(domain)
+        classification, reasons = classify_domain(urlsplit(canonical).hostname or domain)
         if classification != WebsiteCandidateClassification.EXCLUDED:
             classification = (
                 WebsiteCandidateClassification.STRUCTURED_SOURCE
@@ -226,7 +241,7 @@ def _candidate_from_search(
     domain = registrable_domain(canonical or "")
     if not canonical or not domain:
         return None
-    classification, reasons = classify_domain(domain)
+    classification, reasons = classify_domain(urlsplit(canonical).hostname or domain)
     return _build_candidate(
         target, target_fingerprint, _fingerprint({"query": query}), "brave_search",
         query_index, rank, result.url, canonical, domain, result.title,

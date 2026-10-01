@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import ObservedJobOffer
+from app.services.opportunities.provenance import non_ft_only, primary_provenance
 from app.services.opportunities.intermediary import (
     IntermediaryDescriptionEvidence,
     analyze_intermediary_descriptions,
@@ -70,6 +71,9 @@ class ActiveJobOffer:
     first_seen_at: datetime
     last_seen_at: datetime
     observation_count: int
+    non_ft_only: bool = False
+    primary_provenance: str = ""
+    first_discovery_channel: str = ""
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,8 @@ def aggregate_active_company_opportunities(
     grouped: dict[str, list[ObservedJobOffer]] = {}
     unattributed_offer_ids: list[str] = []
     for offer in offers:
+        if not _unexpired(offer, observed_at):
+            continue
         company_key = normalize_company_key(offer.company_name)
         qualified_id = _qualified_offer_id(offer)
         if company_key is None:
@@ -195,12 +201,12 @@ def get_active_company_opportunity(
     Company keys are normalized in Python, so scan only offer names first and
     load the full source rows for the matching company.
     """
-    ids = tuple(row_id for row_id, name in session.execute(
-        select(ObservedJobOffer.id, ObservedJobOffer.company_name).where(
+    ids = tuple(row_id for row_id, name, valid_through in session.execute(
+        select(ObservedJobOffer.id, ObservedJobOffer.company_name, ObservedJobOffer.valid_through).where(
             ObservedJobOffer.is_active.is_(True),
             ObservedJobOffer.department_code == department_code,
         )
-    ) if normalize_company_key(name) == company_key)
+    ) if normalize_company_key(name) == company_key and _valid_through_allows(valid_through, now or datetime.now(timezone.utc)))
     if not ids:
         return None
     offers = tuple(session.scalars(
@@ -284,7 +290,8 @@ def _active_job_offers(
 ) -> tuple[ActiveJobOffer, ...]:
     rows = []
     for canonical in offers:
-        offer = canonical.representative
+        first_observation = min(canonical.observations, key=lambda item: (_as_utc(item.first_seen_at), item.id))
+        offer = next((item for item in canonical.observations if item.origin and item.origin.startswith("official_web:")), None) or next((item for item in canonical.observations if item.source == "employer_career_site"), canonical.representative)
         published_at = _canonical_date(canonical)
         local_key, _, _ = _local_bucket(offer, department_code)
         commune = _clean_location_value(offer.commune)
@@ -294,7 +301,12 @@ def _active_job_offers(
             source_offer_id=item.source_offer_id,
             source_url=item.source_url,
             discovery_provider=item.discovery_provider,
-        ) for item in canonical.observations)
+        ) for item in sorted(canonical.observations, key=lambda item: (
+            0 if (item.origin or "").startswith("official_web:") else
+            1 if item.source == "employer_career_site" else
+            2 if item.source == "france_travail" else 3,
+            item.id,
+        )))
         urls = _sorted_distinct(item.source_url for item in canonical.observations)
         ids = tuple(sorted(_qualified_offer_id(item) for item in canonical.observations))
         sources = _sorted_distinct(item.source for item in canonical.observations)
@@ -319,6 +331,9 @@ def _active_job_offers(
             first_seen_at=min(_as_utc(item.first_seen_at) for item in canonical.observations),
             last_seen_at=max(_as_utc(item.last_seen_at) for item in canonical.observations),
             observation_count=sum(item.observation_count for item in canonical.observations),
+            non_ft_only=non_ft_only(canonical.observations),
+            primary_provenance=primary_provenance(canonical.observations),
+            first_discovery_channel=first_observation.discovery_provider or first_observation.source,
         )))
     return tuple(item[2] for item in sorted(
         rows,
@@ -446,9 +461,17 @@ def _canonicalize_offers(
 
 
 def _can_join_group(offer: ObservedJobOffer, group: Sequence[ObservedJobOffer]) -> bool:
-    if any(existing.source == offer.source for existing in group):
+    if any(existing.source == offer.source and not _same_stable_identifier(existing, offer) for existing in group):
         return False
     return all(_same_cross_source_need(offer, existing) for existing in group)
+
+
+def _same_stable_identifier(left: ObservedJobOffer, right: ObservedJobOffer) -> bool:
+    if left.origin == right.origin:
+        return False
+    left_id = left.source_offer_id.rsplit(":", 1)[-1]
+    right_id = right.source_offer_id.rsplit(":", 1)[-1]
+    return len(left_id) >= 8 and left_id == right_id
 
 
 def _same_cross_source_need(left: ObservedJobOffer, right: ObservedJobOffer) -> bool:
@@ -493,6 +516,17 @@ def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _unexpired(offer: ObservedJobOffer, now: datetime) -> bool:
+    return _valid_through_allows(offer.valid_through, now)
+
+
+def _valid_through_allows(valid_through: Optional[str], now: datetime) -> bool:
+    if not valid_through:
+        return True
+    expiry = _parse_datetime(valid_through)
+    return expiry is not None and expiry >= _as_utc(now)
 
 
 def _as_utc(value: datetime) -> datetime:

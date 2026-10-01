@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import {
-  createJobSourceBoard, createOpenWebRun, deleteJobSourceBoard, fetchJobSourceBoards,
-  fetchLatestOpenWebRun, refreshJobSourceBoard, stopOpenWebRun, updateJobSourceBoard,
+  createJobSourceBoard, createOpenWebRun, createNonFtRun, deleteJobSourceBoard, fetchJobSourceBoards,
+  fetchLatestOpenWebRun, fetchLatestNonFtRun, refreshJobSourceBoard, stopOpenWebRun, stopNonFtRun, updateJobSourceBoard,
 } from '../api'
 import type { JobSourceBoard, JobSourceBoardCreate, SourceRefreshRun } from '../types'
 import { BraveUsageWidget } from './BraveUsageWidget'
@@ -24,6 +24,7 @@ function runDuration(run: SourceRefreshRun | null) {
 export function Sources({ onSignals }: { onSignals: () => void }) {
   const [boards, setBoards] = useState<JobSourceBoard[]>([])
   const [openRun, setOpenRun] = useState<SourceRefreshRun | null>(null)
+  const [nonFtRun, setNonFtRun] = useState<SourceRefreshRun | null>(null)
   const [form, setForm] = useState<JobSourceBoardCreate>(INITIAL)
   const [targetSignals, setTargetSignals] = useState(20)
   const [requestCap, setRequestCap] = useState(8)
@@ -33,19 +34,19 @@ export function Sources({ onSignals }: { onSignals: () => void }) {
 
   const load = useCallback(async () => {
     try {
-      const [nextBoards, nextRun] = await Promise.all([fetchJobSourceBoards(), fetchLatestOpenWebRun()])
-      setBoards(nextBoards); setOpenRun(nextRun); setError(null)
+      const [nextBoards, nextRun, nextNonFtRun] = await Promise.all([fetchJobSourceBoards(), fetchLatestOpenWebRun(), fetchLatestNonFtRun()])
+      setBoards(nextBoards); setOpenRun(nextRun); setNonFtRun(nextNonFtRun); setError(null)
     } catch (value) { setError(errorMessage(value)) }
     finally { setLoading(false) }
   }, [])
 
   useEffect(() => { void load() }, [load])
   useEffect(() => {
-    const active = openRun?.status === 'queued' || openRun?.status === 'running' || boards.some((board) => board.last_refresh_status === 'queued' || board.last_refresh_status === 'running')
+    const active = openRun?.status === 'queued' || openRun?.status === 'running' || nonFtRun?.status === 'queued' || nonFtRun?.status === 'running' || boards.some((board) => board.last_refresh_status === 'queued' || board.last_refresh_status === 'running')
     if (!active) return
     const timer = window.setInterval(() => void load(), 1200)
     return () => window.clearInterval(timer)
-  }, [boards, openRun, load])
+  }, [boards, openRun, nonFtRun, load])
 
   async function addBoard(event: FormEvent) {
     event.preventDefault(); setError(null); setNotice(null)
@@ -82,6 +83,7 @@ export function Sources({ onSignals }: { onSignals: () => void }) {
   }
 
   const openActive = openRun?.status === 'queued' || openRun?.status === 'running'
+  const nonFtActive = nonFtRun?.status === 'queued' || nonFtRun?.status === 'running'
 
   return <section className="sources-page">
     <div className="section-heading"><div><p className="eyebrow">SOURCES D’OFFRES</p><h2>Sites carrière et Open Web</h2><p className="section-intro">Configurez quelques boards employeurs publics, puis lancez uniquement les collectes utiles.</p></div></div>
@@ -89,13 +91,21 @@ export function Sources({ onSignals }: { onSignals: () => void }) {
     {error && <p className="inline-error" role="alert">{error}</p>}
     <BraveUsageWidget />
 
+    <article className="source-card open-web-card">
+      <p className="eyebrow">DÉCOUVERTE COMMERCIALE</p><h3>Opportunités hors France Travail</h3>
+      <p>Inspecte les ATS connus, les sites officiels vérifiés et un petit lot d’établissements du 94. Brave est réservé aux entreprises sans site confirmé ; les résultats restent des signaux à revoir.</p>
+      <div className="source-actions"><button className="primary-button" type="button" disabled={nonFtActive} onClick={async () => { try { setNonFtRun(await createNonFtRun()); setNotice('Découverte hors FT lancée.'); setError(null) } catch (value) { setError(errorMessage(value)) } }}>{nonFtActive ? 'Découverte en cours…' : 'Découvrir hors FT'}</button>{nonFtActive && <button className="secondary-button" type="button" onClick={async () => { try { setNonFtRun(await stopNonFtRun(nonFtRun!.id)) } catch (value) { setError(errorMessage(value)) } }}>Arrêter</button>}</div>
+      {nonFtRun && <dl className="source-metrics"><div><dt>État</dt><dd>{nonFtRun.status}</dd></div><div><dt>Unités examinées</dt><dd>{nonFtRun.pages_processed}</dd></div><div><dt>Nouvelles offres</dt><dd>{nonFtRun.offers_new}</dd></div><div><dt>Signaux</dt><dd>{nonFtRun.signals_found}</dd></div><div><dt>Brave</dt><dd>{nonFtRun.brave_requests_used} / {nonFtRun.brave_hard_cap ?? 0}</dd></div><div><dt>Fin</dt><dd>{nonFtRun.completion_reason ?? '—'}</dd></div></dl>}
+      {nonFtRun?.error_summary && <p className="inline-error">{nonFtRun.error_summary}</p>}
+    </article>
+
     <div className="source-layout">
       <form className="source-card board-form" onSubmit={(event) => void addBoard(event)}>
         <p className="eyebrow">CONFIGURATION ATS</p><h3>Ajouter un site carrière</h3>
-        <label>Provider<select value={form.provider_id} onChange={(event) => setForm({ ...form, provider_id: event.target.value as JobSourceBoardCreate['provider_id'] })}><option value="greenhouse">Greenhouse</option><option value="lever">Lever</option></select></label>
+        <label>Provider<select value={form.provider_id} onChange={(event) => setForm({ ...form, provider_id: event.target.value as JobSourceBoardCreate['provider_id'] })}><option value="greenhouse">Greenhouse</option><option value="lever">Lever</option><option value="ashby">Ashby</option><option value="workable">Workable</option></select></label>
         <label>Nom affiché<input required value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} placeholder="Ex. ACME Carrières" /></label>
         <label>Entreprise<input required value={form.company_name_hint} onChange={(event) => setForm({ ...form, company_name_hint: event.target.value })} placeholder="Nom explicite de l’employeur" /></label>
-        <label>Identifiant ou URL publique<input required value={form.board_identifier} onChange={(event) => setForm({ ...form, board_identifier: event.target.value })} placeholder={form.provider_id === 'greenhouse' ? 'boards.greenhouse.io/entreprise' : 'jobs.lever.co/entreprise'} /><small>Seuls les domaines publics reconnus du provider sont acceptés.</small></label>
+        <label>Identifiant ou URL publique<input required value={form.board_identifier} onChange={(event) => setForm({ ...form, board_identifier: event.target.value })} placeholder={form.provider_id === 'greenhouse' ? 'boards.greenhouse.io/entreprise' : form.provider_id === 'lever' ? 'jobs.lever.co/entreprise' : form.provider_id === 'ashby' ? 'jobs.ashbyhq.com/entreprise' : 'apply.workable.com/entreprise'} /><small>Seuls les domaines publics reconnus du provider sont acceptés.</small></label>
         <button className="primary-button" type="submit">Ajouter le board</button>
       </form>
 
@@ -111,7 +121,7 @@ export function Sources({ onSignals }: { onSignals: () => void }) {
 
     <section className="board-list-section"><div className="section-heading"><div><p className="eyebrow">BOARDS EMPLOYEURS</p><h2>Sites carrière configurés</h2></div><button className="secondary-button" type="button" onClick={() => void load()}>Actualiser</button></div>
       {loading && <div className="state-card">Chargement des sources…</div>}
-      {!loading && boards.length === 0 && <div className="state-card"><h3>Aucun board configuré</h3><p>Ajoutez un board Greenhouse ou Lever public pour commencer.</p></div>}
+      {!loading && boards.length === 0 && <div className="state-card"><h3>Aucun board configuré</h3><p>Ajoutez un board ATS public pour commencer.</p></div>}
       <div className="board-list">{boards.map((board) => {
         const busy = board.last_refresh_status === 'queued' || board.last_refresh_status === 'running'
         return <article className="board-card" key={board.id}><div><span className={`status-badge ${board.enabled ? 'active' : 'expired'}`}>{board.enabled ? 'actif' : 'désactivé'}</span><h3>{board.display_name}</h3><p>{board.provider_id} · {board.board_identifier} · {board.company_name_hint}</p></div><div className="board-actions"><button className="secondary-button" type="button" disabled={!board.enabled || busy} onClick={() => void refreshBoard(board)}>{busy ? 'En cours…' : 'Rafraîchir'}</button><button className="secondary-button" type="button" onClick={() => void toggleBoard(board)}>{board.enabled ? 'Désactiver' : 'Activer'}</button><button className="danger-button" type="button" disabled={busy} onClick={() => void removeBoard(board)}>Supprimer</button></div><dl className="source-metrics"><div><dt>Offres actives</dt><dd>{board.active_offer_count}</dd></div><div><dt>Reçues</dt><dd>{board.last_offers_received}</dd></div><div><dt>Nouvelles</dt><dd>{board.last_offers_new}</dd></div><div><dt>Mises à jour</dt><dd>{board.last_offers_updated}</dd></div><div><dt>Désactivées</dt><dd>{board.last_offers_deactivated}</dd></div><div><dt>Durée</dt><dd>{board.last_duration_seconds == null ? '—' : `${board.last_duration_seconds.toFixed(1)} s`}</dd></div><div><dt>Dernier état</dt><dd>{board.last_refresh_status ?? 'jamais lancé'}</dd></div><div><dt>Dernier refresh</dt><dd>{board.last_refresh_at ? new Date(board.last_refresh_at).toLocaleString('fr-FR') : '—'}</dd></div></dl>{board.last_error && <p className="inline-error">{board.last_error}</p>}</article>

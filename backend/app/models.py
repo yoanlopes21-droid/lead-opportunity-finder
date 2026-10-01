@@ -103,6 +103,7 @@ class ObservedJobOffer(Base):
     department_code: Mapped[Optional[str]] = mapped_column(String(10), index=True)
     created_at: Mapped[Optional[str]] = mapped_column(String(64))
     updated_at: Mapped[Optional[str]] = mapped_column(String(64))
+    valid_through: Mapped[Optional[str]] = mapped_column(String(64))
     contract_type: Mapped[Optional[str]] = mapped_column(String(100))
     salary: Mapped[Optional[str]] = mapped_column(String(500))
     source_url: Mapped[Optional[str]] = mapped_column(String(2048))
@@ -181,6 +182,39 @@ class JobSourceBoard(TimestampedModel, Base):
             "provider_id", "board_identifier", name="uq_job_source_board_provider_identifier"
         ),
     )
+
+
+class CompanyDiscoverySeed(Base):
+    """An establishment to inspect, never evidence of a recruitment need."""
+
+    __tablename__ = "company_discovery_seeds"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    siren: Mapped[str] = mapped_column(String(9), index=True)
+    siret: Mapped[str] = mapped_column(String(14), unique=True, index=True)
+    company_name: Mapped[str] = mapped_column(String(500))
+    commune: Mapped[Optional[str]] = mapped_column(String(255))
+    department_code: Mapped[str] = mapped_column(String(3), default="94", index=True)
+    employee_range: Mapped[Optional[str]] = mapped_column(String(50))
+    naf_code: Mapped[Optional[str]] = mapped_column(String(20))
+    official_site_url: Mapped[Optional[str]] = mapped_column(String(2048))
+    site_status: Mapped[str] = mapped_column(String(30), default="unknown")
+    origin: Mapped[str] = mapped_column(String(120), default="dinum")
+    status: Mapped[str] = mapped_column(String(30), default="new", index=True)
+    career_pages: Mapped[list] = mapped_column(JSON, default=list)
+    ats_candidates: Mapped[list] = mapped_column(JSON, default=list)
+    last_inspected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    next_inspection_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    last_result: Mapped[Optional[str]] = mapped_column(String(1000))
+
+
+class CompanySeedCursor(Base):
+    """Small checkpoint for one bounded DINUM geographic seed query."""
+
+    __tablename__ = "company_seed_cursors"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    query_key: Mapped[str] = mapped_column(String(120), unique=True)
+    next_page: Mapped[int] = mapped_column(Integer, default=1)
+    last_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class JobDiscoveryQueryCache(Base):

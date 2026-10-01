@@ -105,7 +105,7 @@ class SecureWebFetcher:
                 raise SecureFetchError("http_error", "Website returned an unusable response")
             headers = getattr(response, "headers", {})
             content_type = str(headers.get("content-type", "")).split(";", 1)[0].strip().casefold()
-            if content_type not in {"text/html", "application/xhtml+xml", "text/plain"}:
+            if content_type not in {"text/html", "application/xhtml+xml", "text/plain", "application/xml", "text/xml"}:
                 raise SecureFetchError("unsupported_content", "Only HTML or text pages are supported")
             length = headers.get("content-length")
             if length and str(length).isdigit() and int(length) > self._max_bytes:
@@ -119,7 +119,7 @@ class SecureWebFetcher:
             page = FetchedPage(
                 requested_url=url, final_url=current, status_code=status,
                 content_type=content_type, text=visible_text,
-                links=links, fetched_at=self._now(),
+                links=links, fetched_at=self._now(), html=text if content_type in {"text/html", "application/xhtml+xml"} else "",
             )
             self._page_cache[url] = page
             self._page_cache[current] = page

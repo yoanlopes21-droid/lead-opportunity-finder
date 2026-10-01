@@ -1,4 +1,4 @@
-import type { BraveUsage, CommercialApproachPack, CommercialCatalogOfferSummary, CommercialDossier, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, InteractionCreate, InteractionHistory, InteractionSaved, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecentCommercialLeadPage, RecentLeadKind, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
+import type { BraveUsage, CommercialApproachPack, CommercialCatalogOfferSummary, CommercialDossier, CommercialExclusion, CommercialExclusionCreate, CommercialExclusionPage, CommercialLeadPage, CommercialRelationship, CommercialRelationshipInput, CommercialRelationshipPage, ExclusionImportPreview, ExclusionImportReport, InteractionCreate, InteractionHistory, InteractionSaved, JobOfferRefreshRun, JobSourceBoard, JobSourceBoardCreate, RecentCommercialLeadPage, RecentLeadKind, RecentSourceFilter, RecruitmentSignalPage, SearchRun, SearchRunCreate, SourceRefreshRun } from './types'
 
 // Production is same-origin (FastAPI serves dist); Vite development uses its proxy.
 export const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL ?? ''
@@ -55,13 +55,25 @@ export function downloadCommercialLeadsExcel(): Promise<void> {
   return downloadXlsx('/api/v1/commercial-leads/export.xlsx?department=94')
 }
 
-export function fetchRecentCommercialLeads(offset: number, windowHours: number, kind: RecentLeadKind): Promise<RecentCommercialLeadPage> {
-  const params = new URLSearchParams({ department: '94', window_hours: String(windowHours), kind, limit: '50', offset: String(offset) })
+export function fetchRecentCommercialLeads(offset: number, windowHours: number, kind: RecentLeadKind, sourceFilter: RecentSourceFilter = 'all'): Promise<RecentCommercialLeadPage> {
+  const params = new URLSearchParams({ department: '94', window_hours: String(windowHours), kind, source_filter: sourceFilter, limit: '50', offset: String(offset) })
   return readJson<RecentCommercialLeadPage>(`/api/v1/commercial-leads/recent?${params}`)
 }
 
-export function downloadRecentCommercialLeadsExcel(windowHours: number, kind: RecentLeadKind): Promise<void> {
-  const params = new URLSearchParams({ department: '94', window_hours: String(windowHours), kind })
+export function createNonFtRun(targetLeads = 25, braveMaxRequests = 10): Promise<SourceRefreshRun> {
+  return readJson<SourceRefreshRun>('/api/v1/non-ft-discovery/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target_leads: targetLeads, brave_max_requests: braveMaxRequests }) })
+}
+
+export function fetchLatestNonFtRun(): Promise<SourceRefreshRun | null> {
+  return readJson<SourceRefreshRun | null>('/api/v1/non-ft-discovery/runs/latest')
+}
+
+export function stopNonFtRun(id: number): Promise<SourceRefreshRun> {
+  return readJson<SourceRefreshRun>(`/api/v1/non-ft-discovery/runs/${id}/stop`, { method: 'POST' })
+}
+
+export function downloadRecentCommercialLeadsExcel(windowHours: number, kind: RecentLeadKind, sourceFilter: RecentSourceFilter = 'all'): Promise<void> {
+  const params = new URLSearchParams({ department: '94', window_hours: String(windowHours), kind, source_filter: sourceFilter })
   return downloadXlsx(`/api/v1/commercial-leads/recent/export.xlsx?${params}`)
 }
 

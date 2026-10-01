@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+from __future__ import annotations
+
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import CollectionRun, ObservedJobOffer, RecruitmentSignal
+from app.models import CollectionRun, ObservedJobOffer, RecruitmentSignal, VerifiedWebsiteRecord
+from app.services.collection.jobposting import parse_jobpostings
+from app.services.contactability.providers.official_web.fetcher import SecureWebFetcher
+from app.services.contactability.providers.official_web.robots import RobotsTxtPolicy
+from app.services.contactability.providers.official_web.discovery import registrable_domain
+from app.services.opportunities.company import normalize_company_key
 from app.services.collection.open_web import (
     BRAVE_DISCOVERY_PROVIDER,
     PAGE_TYPE_LABELS,
@@ -28,11 +36,7 @@ from app.services.persistence.offers import (
 
 
 SIGNAL_STATUSES = ("new", "review_needed", "promoted", "dismissed")
-PROMOTABLE_SOURCES = {
-    "linkedin", "indeed", "hellowork", "leboncoin", "welcome_to_the_jungle",
-    "employer_career_site", "cadremploi", "directemploi", "france_travail",
-    "glassdoor", "jooble", "meteojob",
-}
+PROMOTABLE_SOURCES = {"employer_career_site"}
 
 
 class SignalPromotionError(ValueError):
@@ -48,7 +52,7 @@ class SignalPromotionAssessment:
     geography: OfferGeography
 
 
-def assess_signal_promotion(signal: RecruitmentSignal) -> SignalPromotionAssessment:
+def assess_signal_promotion(signal: RecruitmentSignal, session: Session | None = None) -> SignalPromotionAssessment:
     title = normalize_index_text(signal.title)
     snippet = normalize_index_text(signal.snippet)
     page_type = classify_page_type(signal.source_url, source=signal.source, title=title)
@@ -64,7 +68,16 @@ def assess_signal_promotion(signal: RecruitmentSignal) -> SignalPromotionAssessm
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         blockers.append("URL preuve invalide")
     if signal.source not in PROMOTABLE_SOURCES:
-        blockers.append("Source non reconnue")
+        blockers.append("Page tierce : seule une offre sur domaine employeur vérifié peut être promue")
+    elif session is None or not parsed.hostname or not signal.company_name or not session.scalar(
+        select(VerifiedWebsiteRecord.id).where(
+            VerifiedWebsiteRecord.company_key == normalize_company_key(signal.company_name),
+            VerifiedWebsiteRecord.registrable_domain == registrable_domain(signal.source_url),
+            VerifiedWebsiteRecord.status == "high_confidence",
+            VerifiedWebsiteRecord.fresh_until >= datetime.now(timezone.utc),
+        )
+    ):
+        blockers.append("Domaine officiel non vérifié pour cet employeur")
     if geography.department_code != "94":
         blockers.append("Localisation 94 non prouvée")
     return SignalPromotionAssessment(
@@ -83,7 +96,7 @@ def promote_signal(session: Session, signal: RecruitmentSignal) -> ObservedJobOf
             return existing
     if signal.status == "dismissed":
         raise SignalPromotionError("Un signal ignoré ne peut pas être promu sans nouvelle revue.")
-    assessment = assess_signal_promotion(signal)
+    assessment = assess_signal_promotion(signal, session)
     if not assessment.is_promotable:
         signal.status = "review_needed"
         signal.reviewed_at = datetime.now(timezone.utc)
@@ -92,22 +105,22 @@ def promote_signal(session: Session, signal: RecruitmentSignal) -> ObservedJobOf
             "Promotion refusée : " + ", ".join(assessment.blockers) + "."
         )
 
+    fetcher = SecureWebFetcher()
+    policy = RobotsTxtPolicy(fetcher)
+    fetcher.set_robots_checker(policy.allowed)
+    try:
+        page = fetcher.fetch(signal.source_url, initial=False)
+        domain = urlparse(signal.source_url).hostname or ""
+        confirmed = parse_jobpostings(page.html, page.final_url, signal.company_name, domain)
+    except Exception as exc:
+        raise SignalPromotionError("Page employeur impossible à vérifier") from exc
+    snapshot = next((row for row in confirmed if normalize_company_key(row.title) == normalize_company_key(signal.job_title)), None)
+    if snapshot is None:
+        raise SignalPromotionError("Offre JobPosting correspondante absente ou insuffisante")
     run = create_collection_run(session, BRAVE_DISCOVERY_PROVIDER, "signal", str(signal.id))
-    source_offer_id = "web:" + hashlib.sha256(signal.source_url.encode("utf-8")).hexdigest()[:32]
     result = upsert_offer(session, run, OfferSnapshot(
-        source=signal.source,
-        source_offer_id=source_offer_id,
-        title=signal.job_title.strip(),
-        description=signal.snippet,
-        company_name=signal.company_name.strip(),
-        location_label=assessment.geography.location_label,
-        commune=assessment.geography.commune,
-        department_code="94",
-        created_at=signal.published_at,
-        source_url=signal.source_url,
-        discovery_provider=BRAVE_DISCOVERY_PROVIDER,
-        origin=f"recruitment_signal:{signal.id}",
-        recruitment_signal_id=signal.id,
+        **{**snapshot.__dict__, "discovery_provider": BRAVE_DISCOVERY_PROVIDER,
+           "recruitment_signal_id": signal.id}
     ))
     run.signals_promoted = 1
     complete_collection_run(session, run, full_scope_completed=True, deactivate_unseen=False)
